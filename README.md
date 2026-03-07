@@ -22,7 +22,7 @@ The only actions performed on the Git repository are:
 
 ## Usage
 
-There are a few high-level commands that require a Git repo. (see also, detailed argument descriptions further below this list)
+There are a few high-level commands that require a Git repo. (see also [[#Argument Details]])
 - `cycledit list [LIST ARGS]`
     - Prints a list of matching filepaths (relative to the Git root) with their Git modification date
         - NOTE: The modification date is printed before the filepath, for a minimal-effort table format, in the pattern: `YYYY-MM-DD FILEPATH`
@@ -40,9 +40,9 @@ There are a few high-level commands that require a Git repo. (see also, detailed
 When outside of a Git repo,
 - `cycledit` fails with a helpful error message to enter a Git repo
 
-### Overview of specific arguments
+### Argument Details
 - `[LIST ARGS]` include:
-    - `[PATHSPEC]` (optional, may be repeated) which files/directories to include from the Git index. Fileglobs (e.g. *.c) can be given to list all matching files.
+    - `[PATHSPEC]` (optional, may be repeated) which files/directories to include from the Git index. Fileglobs (e.g. `*.c`) can be given to list all matching files.
         (default: the closest Git worktree containing the current directory)
     - `--exclude PATHSPEC` (optional, may be repeated) same as above, but excludes the files/directories matching the pattern
 - `[SCHEDULE ARGS]` include:
@@ -65,3 +65,8 @@ The command doesn't store any state, yet consecutive invocations yield the same 
 - For any files modified on the same date, the Git hash for the file entry provides a unique identifier for each unique file
 - Modifying a file changes the Git blob hash, but also pushes it later in the schedule
 - The result is a deterministic order for "filling" the schedule, where newly modified files are pushed to the end
+
+
+### Notable Dependencies
+- [`jiff`](https://crates.io/crates/jiff) for parsing durations from the CLI and date/time arithmetic
+- [`gix`](https://crates.io/crates/gix) for readonly access to the Git state
