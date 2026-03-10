@@ -68,5 +68,34 @@ The command doesn't store any state, yet consecutive invocations yield the same 
 
 
 ### Notable Dependencies
-- [`jiff`](https://crates.io/crates/jiff) for parsing durations from the CLI and date/time arithmetic
-- [`gix`](https://crates.io/crates/gix) for readonly access to the Git state
+- dependencies
+    - [`jiff`](https://crates.io/crates/jiff) for parsing durations from the CLI and date/time arithmetic
+    - [`gix`](https://crates.io/crates/gix) for access to the Git state (readonly in the CLI binary, but writes repositories for the integration tests)
+- dev dependencies
+    - [`insta`](https://crates.io/crates/insta) for snapshot tests
+
+### Test Structure
+Integration tests use inline string constants to define each test:
+- Input - the only test inputs are the Git state and the CLI arguments. Both are defined in string constants fed to a common test harness for ease of defining new tests.
+    ```rust
+    let output = TestHarness::new()
+        .init_git("<GIT STATE STRING>") // trims each line, ignores empty lines
+        .run_cli(["<ARG1>", "<ARG2>"])?; // verbatim args passed to sub-command, no pre-processing
+    ```
+    - Git state - groups of commit dates with the files updated (+) or removed (-) (NOTE: file contents are not irrelevant)
+        ```text
+        2001-05-22:
+        +folder1/sub-folder/file1.txt
+        +root-file.txt
+        +file2.txt
+
+        2037-11-29:
+        -root-file.txt
+        +file2.txt
+
+        2037-11-30:
+        +file2.txt
+        ```
+    - CLI arguments - literal array of string constants to pass to the CLI binary
+- Output - the stdout, stderr, and exit code
+    - Most tests use snapshot testing to verify specific stdout output (for success cases) or stderr (for error cases)
