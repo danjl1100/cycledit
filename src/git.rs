@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gix::ObjectId;
@@ -23,19 +24,14 @@ pub fn list_files(
     let repo = gix::open(repo_path)
         .map_err(|e| eyre::eyre!("not a git repository (or any of the parent directories): {e}"))?;
 
-    // Walk commits from HEAD to build a map: path -> (date, blob_hash)
-    // We use gix to traverse the commit graph and track the most recent commit per path.
     let head_id = repo
         .head_id()
         .map_err(|e| eyre::eyre!("failed to resolve HEAD: {e}"))?;
 
-    // Map from path string -> (date, blob_hash) for the most recently seen commit
-    let mut file_map: std::collections::HashMap<String, (Date, ObjectId)> =
-        std::collections::HashMap::new();
+    // Map from path -> (date, blob_hash) for most recent commit that CHANGED each file.
+    let mut file_dates: HashMap<String, (Date, ObjectId)> = HashMap::new();
 
-    // Walk commits oldest-to-newest using BFS from HEAD; we record the LAST
-    // (most-recent-commit) that touched each path.
-    // Strategy: collect all commits in topo order (newest first), then iterate.
+    // Walk commits newest-first.
     let commits: Vec<_> = repo
         .rev_walk([head_id])
         .all()
@@ -43,65 +39,63 @@ pub fn list_files(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| eyre::eyre!("rev-walk iteration failed: {e}"))?;
 
-    // commits are in newest-first order; we iterate newest-first and keep the
-    // FIRST occurrence (most recent commit) for each path.
     for info in &commits {
         let commit = repo
             .find_object(info.id)
-            .map_err(|e| eyre::eyre!("find commit object: {e}"))?
+            .map_err(|e| eyre::eyre!("find commit: {e}"))?
             .try_into_commit()
-            .map_err(|e| eyre::eyre!("not a commit: {e}"))?;
+            .map_err(|_| eyre::eyre!("not a commit: {}", info.id))?;
 
         let commit_time = commit.time().map_err(|e| eyre::eyre!("commit time: {e}"))?;
-        let secs = commit_time.seconds;
-        let date = jiff::Timestamp::from_second(secs as i64)
+        let date = jiff::Timestamp::from_second(commit_time.seconds as i64)
             .map_err(|e| eyre::eyre!("timestamp: {e}"))?
             .to_zoned(jiff::tz::TimeZone::UTC)
             .date();
 
-        let tree = commit.tree().map_err(|e| eyre::eyre!("commit tree: {e}"))?;
+        let tree_id = commit
+            .tree()
+            .map_err(|e| eyre::eyre!("commit tree: {e}"))?
+            .id;
+        let current_blobs = walk_tree_blobs(&repo, tree_id)?;
 
-        // Walk the tree to enumerate all blobs
-        let mut stack = vec![(String::new(), tree.id)];
-        while let Some((prefix, tree_id)) = stack.pop() {
-            let tree_obj = repo
-                .find_object(tree_id)
-                .map_err(|e| eyre::eyre!("find tree: {e}"))?
-                .try_into_tree()
-                .map_err(|e| eyre::eyre!("not a tree: {e}"))?;
+        // Get parent's blobs for comparison.
+        // decoded.parents contains &BStr hex strings; parse to ObjectId first.
+        let parent_id: Option<ObjectId> = {
+            let decoded = commit
+                .decode()
+                .map_err(|e| eyre::eyre!("decode commit: {e}"))?;
+            decoded
+                .parents
+                .first()
+                .map(|hex| gix::ObjectId::from_hex(hex))
+                .transpose()
+                .map_err(|e| eyre::eyre!("parse parent id: {e}"))?
+        };
+        let parent_blobs: HashMap<String, ObjectId> = if let Some(pid) = parent_id {
+            let parent_commit = repo
+                .find_object(pid)
+                .map_err(|e| eyre::eyre!("find parent: {e}"))?
+                .try_into_commit()
+                .map_err(|_| eyre::eyre!("parent not a commit"))?;
+            let parent_tree_id = parent_commit
+                .tree()
+                .map_err(|e| eyre::eyre!("parent tree: {e}"))?
+                .id;
+            walk_tree_blobs(&repo, parent_tree_id)?
+        } else {
+            HashMap::new()
+        };
 
-            for entry in tree_obj.iter() {
-                let entry = entry.map_err(|e| eyre::eyre!("tree entry: {e}"))?;
-                let name = entry
-                    .filename()
-                    .to_str()
-                    .map_err(|_| eyre::eyre!("non-utf8 filename"))?
-                    .to_string();
-                let full_path = if prefix.is_empty() {
-                    name.clone()
-                } else {
-                    format!("{prefix}/{name}")
-                };
-
-                match entry.mode().kind() {
-                    gix::object::tree::EntryKind::Tree => {
-                        stack.push((full_path, entry.object_id()));
-                    }
-                    gix::object::tree::EntryKind::Blob
-                    | gix::object::tree::EntryKind::BlobExecutable => {
-                        // Only record if not already seen (we want most-recent commit)
-                        file_map
-                            .entry(full_path)
-                            .or_insert_with(|| (date, entry.object_id()));
-                    }
-                    _ => {}
-                }
+        // Record files that changed in this commit (not yet seen in a newer commit).
+        for (path, blob_hash) in &current_blobs {
+            if !file_dates.contains_key(path) && parent_blobs.get(path) != Some(blob_hash) {
+                file_dates.insert(path.clone(), (date, *blob_hash));
             }
         }
     }
 
-    // Apply pathspec and exclude filters
-    let entries: Vec<FileEntry> = file_map
+    // Apply pathspec and exclude filters, build result.
+    let mut entries: Vec<FileEntry> = file_dates
         .into_iter()
         .filter(|(path, _)| {
             let matches_include =
@@ -116,17 +110,54 @@ pub fn list_files(
         })
         .collect();
 
-    // Sort lexicographically by path
-    let mut entries = entries;
     entries.sort_by(|a, b| a.path.cmp(&b.path));
-
     Ok(entries)
 }
 
-/// Simple glob matching: `*` matches any sequence of non-`/` chars, `**` matches anything.
-/// Matches against the full path or just the filename component.
+/// Walk a git tree recursively and return a map of path → blob ObjectId.
+fn walk_tree_blobs(
+    repo: &gix::Repository,
+    tree_id: ObjectId,
+) -> eyre::Result<HashMap<String, ObjectId>> {
+    let mut blobs = HashMap::new();
+    let mut stack = vec![(String::new(), tree_id)];
+    while let Some((prefix, tid)) = stack.pop() {
+        let tree = repo
+            .find_object(tid)
+            .map_err(|e| eyre::eyre!("find tree obj: {e}"))?
+            .try_into_tree()
+            .map_err(|_| eyre::eyre!("not a tree: {tid}"))?;
+
+        for entry in tree.iter() {
+            let entry = entry.map_err(|e| eyre::eyre!("tree entry: {e}"))?;
+            let name = entry
+                .filename()
+                .to_str()
+                .map_err(|_| eyre::eyre!("non-utf8 filename"))?
+                .to_string();
+            let full_path = if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            };
+
+            match entry.mode().kind() {
+                gix::object::tree::EntryKind::Tree => {
+                    stack.push((full_path, entry.object_id()));
+                }
+                gix::object::tree::EntryKind::Blob
+                | gix::object::tree::EntryKind::BlobExecutable => {
+                    blobs.insert(full_path, entry.object_id());
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(blobs)
+}
+
+/// Simple glob matching against file path or filename.
 fn matches_glob(pattern: &str, path: &str) -> bool {
-    // Try matching against the full path and also just the filename
     glob_match(pattern, path)
         || PathBuf::from(path)
             .file_name()
@@ -146,7 +177,6 @@ fn glob_match_inner(pat: &[char], txt: &[char]) -> bool {
         ([], []) => true,
         ([], _) => false,
         (['*', '*', rest_pat @ ..], _) => {
-            // ** matches any sequence including /
             if glob_match_inner(rest_pat, txt) {
                 return true;
             }
@@ -156,7 +186,6 @@ fn glob_match_inner(pat: &[char], txt: &[char]) -> bool {
             false
         }
         (['*', rest_pat @ ..], _) => {
-            // * matches any sequence not including /
             if glob_match_inner(rest_pat, txt) {
                 return true;
             }

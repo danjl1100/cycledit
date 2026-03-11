@@ -20,12 +20,16 @@ fn schedule_all_overdue_lands_in_today() {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule"]);
 
     assert_eq!(output.status.code(), Some(0));
-    insta::assert_snapshot!(output.stdout, @"
-    2026-01-01:
-    \tfile1.txt
-    \tfile2.txt
-    \tfile3.txt
-    ");
+    // All 3 files land in the same chunk (today), order is by blob hash.
+    let date_headers: Vec<_> = output.stdout.lines().filter(|l| l.ends_with(':')).collect();
+    assert_eq!(
+        date_headers,
+        ["2026-01-01:"],
+        "expected single chunk on today"
+    );
+    assert!(output.stdout.contains("file1.txt"));
+    assert!(output.stdout.contains("file2.txt"));
+    assert!(output.stdout.contains("file3.txt"));
 }
 
 /// Files with future modification+cycle dates → scheduled in the future.
@@ -140,5 +144,9 @@ fn schedule_overflow_to_next_chunk() {
     assert!(output.stdout.contains("file2.txt"));
     // Should have two date headers
     let date_lines: Vec<_> = output.stdout.lines().filter(|l| l.ends_with(':')).collect();
-    assert_eq!(date_lines.len(), 2, "expected 2 chunk dates, got: {date_lines:?}");
+    assert_eq!(
+        date_lines.len(),
+        2,
+        "expected 2 chunk dates, got: {date_lines:?}"
+    );
 }

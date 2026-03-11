@@ -63,12 +63,10 @@ fn today() -> eyre::Result<jiff::civil::Date> {
     }
 }
 
-fn parse_span_days(s: &str) -> eyre::Result<i64> {
+fn parse_span_days(s: &str, ref_date: jiff::civil::Date) -> eyre::Result<i64> {
     let span: jiff::Span = s
         .parse()
         .map_err(|e| eyre::eyre!("invalid duration '{s}': {e}"))?;
-    // Convert to days relative to a fixed reference date
-    let ref_date = jiff::civil::date(2000, 1, 1);
     let end = ref_date
         .checked_add(span)
         .map_err(|e| eyre::eyre!("duration overflow: {e}"))?;
@@ -128,8 +126,8 @@ fn run() -> eyre::Result<i32> {
             let root = find_repo_root()?;
             let today = today()?;
             let entries = git::list_files(&root, &pathspecs, &excludes)?;
-            let cycle_days = parse_span_days(&cycle)?;
-            let chunk_days = parse_span_days(&chunk)?;
+            let cycle_days = parse_span_days(&cycle, today)?;
+            let chunk_days = parse_span_days(&chunk, today)?;
             let schedule =
                 cycledit::schedule::compute_schedule(entries, cycle_days, chunk_days, today);
             for (date, files) in &schedule {
@@ -146,8 +144,8 @@ fn run() -> eyre::Result<i32> {
             let root = find_repo_root()?;
             let today = today()?;
             let entries = git::list_files(&root, &pathspecs, &excludes)?;
-            let cycle_days = parse_span_days(&cycle)?;
-            let chunk_days = parse_span_days(&chunk)?;
+            let cycle_days = parse_span_days(&cycle, today)?;
+            let chunk_days = parse_span_days(&chunk, today)?;
             let schedule =
                 cycledit::schedule::compute_schedule(entries, cycle_days, chunk_days, today);
             for (date, files) in schedule.iter().filter(|(d, _)| **d <= today) {
@@ -165,8 +163,8 @@ fn run() -> eyre::Result<i32> {
             let today = today()?;
             let entries = git::list_files(&root, &pathspecs, &excludes)?;
             let total = entries.len();
-            let cycle_days = parse_span_days(&cycle)?;
-            let chunk_days = parse_span_days(&chunk)?;
+            let cycle_days = parse_span_days(&cycle, today)?;
+            let chunk_days = parse_span_days(&chunk, today)?;
             let schedule =
                 cycledit::schedule::compute_schedule(entries, cycle_days, chunk_days, today);
             let due: usize = schedule
