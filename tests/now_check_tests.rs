@@ -91,15 +91,17 @@ fn current_time_zoned_drives_today() {
         +file1.txt
     ";
 
-    let output_before = TestHarness::new()
-        .init_git(state)
-        .run_cli("2024-01-10T00:00:00+00:00[UTC]", &["now", "--cycle", "P10D"]);
+    let output_before = TestHarness::new().init_git(state).run_cli(
+        "2024-01-10T00:00:00+00:00[UTC]",
+        &["now", "--cycle", "P10D"],
+    );
     assert_eq!(output_before.status.code(), Some(0));
     assert_eq!(output_before.stdout, "", "should be empty before due date");
 
-    let output_on = TestHarness::new()
-        .init_git(state)
-        .run_cli("2024-01-11T00:00:00+00:00[UTC]", &["now", "--cycle", "P10D"]);
+    let output_on = TestHarness::new().init_git(state).run_cli(
+        "2024-01-11T00:00:00+00:00[UTC]",
+        &["now", "--cycle", "P10D"],
+    );
     assert_eq!(output_on.status.code(), Some(0));
     assert!(
         output_on.stdout.contains("file1.txt"),
