@@ -57,11 +57,9 @@ impl TestHarness {
 
             if let Some(path_str) = line.strip_prefix('+') {
                 let file_path = dir.join(path_str);
-                std::fs::create_dir_all(file_path.parent().unwrap())
-                    .expect("create dirs");
+                std::fs::create_dir_all(file_path.parent().unwrap()).expect("create dirs");
                 // Write unique content so each file gets a unique blob hash
-                std::fs::write(&file_path, format!("{date}:{path_str}"))
-                    .expect("write file");
+                std::fs::write(&file_path, format!("{date}:{path_str}")).expect("write file");
                 run_git(dir, &["add", path_str]);
             } else if let Some(path_str) = line.strip_prefix('-') {
                 run_git(dir, &["rm", "--force", path_str]);
@@ -72,7 +70,12 @@ impl TestHarness {
             let datetime = format!("{date}T12:00:00+00:00");
             run_git_env(
                 dir,
-                &["commit", "--allow-empty", "-m", &format!("commit on {date}")],
+                &[
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    &format!("commit on {date}"),
+                ],
                 &[
                     ("GIT_COMMITTER_DATE", datetime.as_str()),
                     ("GIT_AUTHOR_DATE", datetime.as_str()),
