@@ -17,9 +17,8 @@ Git already knows when you last modified each file, so we can query that history
 ## Scope
 This project is agnostic to what exactly is contained in target Git repository.
 The only actions performed on the Git repository are:
-1. Determine whether the Git worktree is dirty or has untracked files, to optionally report warnings to the user
-2. List the files tracked by Git
-3. Query date of the most recent Git commit that modified each listed file
+1. List the files tracked by Git
+2. Query date of the most recent Git commit that modified each listed file
 
 ## Usage
 
@@ -48,9 +47,8 @@ There are a few high-level commands that require a Git repo. (see also [[#Argume
 		2026-10-03:
 			a_recent_file.txt
 		```
-		- #FIXME *dates in the sample above are approximate... splitting a year in thirds is tricky without a civil date calculator like jiff*
 - `cycledit now [LIST ARGS] [SCHEDULE ARGS]`
-	- Identical to `cycledit schedule`, but only shows the first chunk (see `--chunk DURATION` below, equivalently excludes future scheduled edit dates, only showing entries to edit on the current date)
+	- Identical to `cycledit schedule`, but only shows chunks whose scheduled date is on or before today (filters out future scheduled edit dates)
 	- Sample output
 		```
 		2026-02-03:
@@ -77,7 +75,7 @@ When outside of a Git repo,
 	- `--exclude PATHSPEC` (optional, may be repeated) same as above, but excludes the files/directories matching the pattern
 - `[SCHEDULE ARGS]` include:
 	- `--cycle DURATION` (default 1 year) the total duration to schedule the entries across
-	- `--chunk DURATION` (default 7 days) the duration
+	- `--chunk DURATION` (default 7 days) the duration of each scheduling chunk
 	- NOTE: Duration arguments are parsed per the format in [jiff span-format docs](https://docs.rs/jiff/latest/jiff/fmt/temporal/index.html#span-format)
 
 ## Implementation details
@@ -101,7 +99,7 @@ The command doesn't store any state, yet consecutive invocations yield the same 
 ### Notable Dependencies
 - dependencies
 	- [`jiff`](https://crates.io/crates/jiff) for parsing durations from the CLI and date/time arithmetic
-	- [`gix`](https://crates.io/crates/gix) for access to the Git state (readonly in the CLI binary, but writes repositories for the integration tests)
+	- [`gix`](https://crates.io/crates/gix) for readonly access to the Git state
 - dev dependencies
 	- [`insta`](https://crates.io/crates/insta) for snapshot tests
 
@@ -111,7 +109,7 @@ Integration tests use inline string constants to define each test:
 	```rust
 	let output = TestHarness::new()
 		.init_git("<GIT STATE STRING>") // trims each line, ignores empty lines
-		.run_cli("YYYY-MM-DDTHH:MM:SS-OFFSET[TZ]", ["<ARG1>", "<ARG2>"])?; // verbatim args passed to sub-command, no pre-processing
+		.run_cli("YYYY-MM-DDTHH:MM:SS-OFFSET[TZ]", &["<ARG1>", "<ARG2>"]); // verbatim args passed to sub-command, no pre-processing
 	```
 	- Git state - groups of commit dates with the files updated (+) or removed (-) (NOTE: file contents are not irrelevant)
 		```text

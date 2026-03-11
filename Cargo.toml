@@ -3,4 +3,16 @@ name = "cycledit"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "cycledit"
+path = "src/bin/cycledit.rs"
+
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+jiff = "0.2"
+gix = { version = "0.70", default-features = false, features = ["revision", "index"] }
+eyre = "0.6"
+
+[dev-dependencies]
+insta = { version = "1", features = ["filters"] }
+tempfile = "3"
