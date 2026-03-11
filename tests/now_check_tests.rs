@@ -60,7 +60,8 @@ fn check_warn_when_files_due() {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["check"]);
 
     assert_eq!(output.status.code(), Some(100));
-    insta::assert_snapshot!(output.stdout, @"WARN: Need to update 3 file(s) now (of 3 files total)\n");
+    // ceil(7/365) = 1 per chunk; only the first chunk falls on today (1 of 3 files)
+    insta::assert_snapshot!(output.stdout, @"WARN: Need to update 1 file(s) now (of 3 files total)\n");
 }
 
 /// `check` exits 0 and prints PASS when nothing is due.

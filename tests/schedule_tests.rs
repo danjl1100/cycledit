@@ -7,7 +7,7 @@ use common::TestHarness;
 #[test]
 fn schedule_all_overdue_lands_in_today() {
     // 3 files all committed 2001-05-22, cycle=1yr, chunk=7d
-    // max_per_chunk = ceil(365/7) = 53, so all 3 fit in one chunk on today (2026-01-01)
+    // max_per_chunk = ceil(7/365) = 1, so each file gets its own chunk
     let output = TestHarness::new()
         .init_git(
             "
@@ -20,12 +20,12 @@ fn schedule_all_overdue_lands_in_today() {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule"]);
 
     assert_eq!(output.status.code(), Some(0));
-    // All 3 files land in the same chunk (today), order is by blob hash.
+    // Each file gets its own chunk; all overdue, so they start at today.
     let date_headers: Vec<_> = output.stdout.lines().filter(|l| l.ends_with(':')).collect();
+    assert_eq!(date_headers.len(), 3, "expected 3 chunks (1 per file)");
     assert_eq!(
-        date_headers,
-        ["2026-01-01:"],
-        "expected single chunk on today"
+        date_headers[0], "2026-01-01:",
+        "first chunk should be today"
     );
     assert!(output.stdout.contains("file1.txt"));
     assert!(output.stdout.contains("file2.txt"));

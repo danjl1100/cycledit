@@ -17,7 +17,7 @@ pub fn compute_schedule(
             .then_with(|| a.blob_hash.cmp(&b.blob_hash))
     });
 
-    let max_per_chunk = ((cycle_days + chunk_days - 1) / chunk_days) as usize;
+    let max_per_chunk = ((chunk_days + cycle_days - 1) / cycle_days) as usize;
     let mut chunk_map: BTreeMap<Date, Vec<FileEntry>> = BTreeMap::new();
 
     for entry in entries {
