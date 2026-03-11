@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use cycledit::git;
 
 #[derive(Parser)]
@@ -6,6 +6,20 @@ use cycledit::git;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+/// Arguments shared by schedule, now, and check subcommands.
+#[derive(Args)]
+struct ScheduleArgs {
+    pathspecs: Vec<String>,
+    #[arg(long = "exclude")]
+    excludes: Vec<String>,
+    /// Total cycle duration (default: 1 year)
+    #[arg(long, default_value = "P1Y")]
+    cycle: String,
+    /// Chunk duration (default: 7 days)
+    #[arg(long, default_value = "P7D")]
+    chunk: String,
 }
 
 #[derive(Subcommand)]
@@ -19,37 +33,11 @@ enum Commands {
         excludes: Vec<String>,
     },
     /// Show the full edit schedule
-    Schedule {
-        pathspecs: Vec<String>,
-        #[arg(long = "exclude")]
-        excludes: Vec<String>,
-        /// Total cycle duration (default: 1 year)
-        #[arg(long, default_value = "P1Y")]
-        cycle: String,
-        /// Chunk duration (default: 7 days)
-        #[arg(long, default_value = "P7D")]
-        chunk: String,
-    },
+    Schedule(ScheduleArgs),
     /// Show only files due now (chunk_date <= today)
-    Now {
-        pathspecs: Vec<String>,
-        #[arg(long = "exclude")]
-        excludes: Vec<String>,
-        #[arg(long, default_value = "P1Y")]
-        cycle: String,
-        #[arg(long, default_value = "P7D")]
-        chunk: String,
-    },
+    Now(ScheduleArgs),
     /// Check if any files are due; exits 100 if so
-    Check {
-        pathspecs: Vec<String>,
-        #[arg(long = "exclude")]
-        excludes: Vec<String>,
-        #[arg(long, default_value = "P1Y")]
-        cycle: String,
-        #[arg(long, default_value = "P7D")]
-        chunk: String,
-    },
+    Check(ScheduleArgs),
 }
 
 fn today() -> eyre::Result<jiff::civil::Date> {
@@ -117,12 +105,12 @@ fn run() -> eyre::Result<i32> {
             }
         }
 
-        Commands::Schedule {
+        Commands::Schedule(ScheduleArgs {
             pathspecs,
             excludes,
             cycle,
             chunk,
-        } => {
+        }) => {
             let root = find_repo_root()?;
             let today = today()?;
             let entries = git::list_files(&root, &pathspecs, &excludes)?;
@@ -135,12 +123,12 @@ fn run() -> eyre::Result<i32> {
             }
         }
 
-        Commands::Now {
+        Commands::Now(ScheduleArgs {
             pathspecs,
             excludes,
             cycle,
             chunk,
-        } => {
+        }) => {
             let root = find_repo_root()?;
             let today = today()?;
             let entries = git::list_files(&root, &pathspecs, &excludes)?;
@@ -153,12 +141,12 @@ fn run() -> eyre::Result<i32> {
             }
         }
 
-        Commands::Check {
+        Commands::Check(ScheduleArgs {
             pathspecs,
             excludes,
             cycle,
             chunk,
-        } => {
+        }) => {
             let root = find_repo_root()?;
             let today = today()?;
             let entries = git::list_files(&root, &pathspecs, &excludes)?;

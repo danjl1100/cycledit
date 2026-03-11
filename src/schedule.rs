@@ -24,7 +24,7 @@ pub fn compute_schedule(
         let earliest = entry
             .date
             .checked_add(jiff::Span::new().days(cycle_days))
-            .unwrap();
+            .expect("date arithmetic overflow");
         let mut chunk_date = earliest.max(today);
         loop {
             let count = chunk_map.get(&chunk_date).map_or(0, |v| v.len());
@@ -33,7 +33,7 @@ pub fn compute_schedule(
             }
             chunk_date = chunk_date
                 .checked_add(jiff::Span::new().days(chunk_days))
-                .unwrap();
+                .expect("date arithmetic overflow");
         }
         chunk_map.entry(chunk_date).or_default().push(entry);
     }
