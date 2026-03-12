@@ -17,12 +17,12 @@ pub struct FileEntry {
 /// `pathspecs` — if non-empty, only files matching at least one spec are included.
 /// `excludes`  — files matching any exclude spec are removed.
 pub fn list_files(
-    repo_path: &std::path::Path,
+    directory: &std::path::Path,
     pathspecs: &[String],
     excludes: &[String],
 ) -> eyre::Result<Vec<FileEntry>> {
-    let repo = gix::open(repo_path)
-        .map_err(|e| eyre::eyre!("not a git repository (or any of the parent directories): {e}"))?;
+    let repo = gix::discover(directory)
+        .map_err(|e| eyre::eyre!("{e}"))?;
 
     let head_id = repo
         .head_id()
