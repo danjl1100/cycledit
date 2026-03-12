@@ -84,6 +84,20 @@ fn list_exclude_filter() {
 }
 
 #[test]
+fn init_git_commits_once_per_date_block() {
+    // Three files in one date block must produce exactly one commit.
+    let harness = TestHarness::new().init_git(
+        "
+        2001-05-22:
+        +file1.txt
+        +file2.txt
+        +file3.txt
+        ",
+    );
+    assert_eq!(harness.commit_count(), 1);
+}
+
+#[test]
 fn list_error_not_in_git_repo() {
     // Run from a temp dir that is NOT a git repo (no init_git call)
     let output = TestHarness::new().run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"]);
