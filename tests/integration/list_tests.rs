@@ -103,5 +103,10 @@ fn list_error_not_in_git_repo() {
     let output = TestHarness::new().run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"]);
 
     assert_eq!(output.status.code(), Some(1));
-    insta::assert_snapshot!(output.stderr);
+    // Filter the temp path which varies per run.
+    insta::with_settings!({
+        filters => vec![(r"'/[^']+'", "'[PATH]'")]
+    }, {
+        insta::assert_snapshot!(output.stderr);
+    });
 }

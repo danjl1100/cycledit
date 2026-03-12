@@ -74,23 +74,6 @@ fn parse_positive_span_days(s: &str, arg: &str, ref_date: jiff::civil::Date) -> 
     Ok(days)
 }
 
-fn find_repo_root() -> eyre::Result<std::path::PathBuf> {
-    let cwd = std::env::current_dir()?;
-    // Walk up to find .git
-    let mut dir = cwd.as_path();
-    loop {
-        if dir.join(".git").exists() {
-            return Ok(dir.to_path_buf());
-        }
-        match dir.parent() {
-            Some(p) => dir = p,
-            None => {
-                eyre::bail!("not a git repository (or any of the parent directories): .git")
-            }
-        }
-    }
-}
-
 fn print_schedule_chunk(date: jiff::civil::Date, files: &[git::FileEntry]) {
     println!("{date}:");
     for f in files {
@@ -100,14 +83,14 @@ fn print_schedule_chunk(date: jiff::civil::Date, files: &[git::FileEntry]) {
 
 fn run() -> eyre::Result<i32> {
     let cli = Cli::parse();
+    let cwd = std::env::current_dir()?;
 
     match cli.command {
         Commands::List {
             pathspecs,
             excludes,
         } => {
-            let root = find_repo_root()?;
-            let entries = git::list_files(&root, &pathspecs, &excludes)?;
+            let entries = git::list_files(&cwd, &pathspecs, &excludes)?;
             for entry in &entries {
                 println!("{} {}", entry.date, entry.path.display());
             }
@@ -119,9 +102,8 @@ fn run() -> eyre::Result<i32> {
             cycle,
             chunk,
         }) => {
-            let root = find_repo_root()?;
             let today = today()?;
-            let entries = git::list_files(&root, &pathspecs, &excludes)?;
+            let entries = git::list_files(&cwd, &pathspecs, &excludes)?;
             let cycle_days = parse_positive_span_days(&cycle, "cycle", today)?;
             let chunk_days = parse_positive_span_days(&chunk, "chunk", today)?;
             let schedule =
@@ -137,9 +119,8 @@ fn run() -> eyre::Result<i32> {
             cycle,
             chunk,
         }) => {
-            let root = find_repo_root()?;
             let today = today()?;
-            let entries = git::list_files(&root, &pathspecs, &excludes)?;
+            let entries = git::list_files(&cwd, &pathspecs, &excludes)?;
             let cycle_days = parse_positive_span_days(&cycle, "cycle", today)?;
             let chunk_days = parse_positive_span_days(&chunk, "chunk", today)?;
             let schedule =
@@ -155,9 +136,8 @@ fn run() -> eyre::Result<i32> {
             cycle,
             chunk,
         }) => {
-            let root = find_repo_root()?;
             let today = today()?;
-            let entries = git::list_files(&root, &pathspecs, &excludes)?;
+            let entries = git::list_files(&cwd, &pathspecs, &excludes)?;
             let total = entries.len();
             let cycle_days = parse_positive_span_days(&cycle, "cycle", today)?;
             let chunk_days = parse_positive_span_days(&chunk, "chunk", today)?;
