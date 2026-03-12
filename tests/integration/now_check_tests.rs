@@ -1,6 +1,4 @@
-mod common;
-
-use common::TestHarness;
+use crate::common::TestHarness;
 
 /// `now` shows only chunks whose date <= today.
 #[test]

@@ -1,6 +1,4 @@
-mod common;
-
-use common::TestHarness;
+use crate::common::TestHarness;
 
 #[test]
 fn list_single_file() {
@@ -83,24 +81,9 @@ fn list_exclude_filter() {
 
 #[test]
 fn list_error_not_in_git_repo() {
-    // Run from a temp dir that is NOT a git repo
-    let dir = tempfile::TempDir::new().unwrap();
-    let binary = env!("CARGO_BIN_EXE_cycledit");
-    let output = std::process::Command::new(binary)
-        .args(["list"])
-        .current_dir(dir.path())
-        .env_clear()
-        .env("TZ", "UTC")
-        .env("CURRENT_TIME_ZONED", "2026-01-01T00:00:00+00:00[UTC]")
-        .env("PATH", std::env::var("PATH").unwrap_or_default())
-        .env("HOME", std::env::var("HOME").unwrap_or_default())
-        .output()
-        .unwrap();
+    // Run from a temp dir that is NOT a git repo (no init_git call)
+    let output = TestHarness::new().run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"]);
 
     assert_ne!(output.status.code(), Some(0));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("git repo") || stderr.contains("repository"),
-        "expected git repo error in stderr, got: {stderr}"
-    );
+    insta::assert_snapshot!(output.stderr);
 }
