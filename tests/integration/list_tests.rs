@@ -12,6 +12,7 @@ fn list_single_file() {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"]);
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"2001-05-22 root-file.txt\n");
 }
 
@@ -29,6 +30,7 @@ fn list_multiple_sorted_lexicographically() {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"]);
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"
     2001-05-22 aaa.txt
     2001-05-22 folder1/file.txt
@@ -50,6 +52,7 @@ fn list_pathspec_filter() {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list", "*.txt"]);
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"
     2001-05-22 file1.txt
     2001-05-22 file2.txt
@@ -73,6 +76,7 @@ fn list_exclude_filter() {
         );
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"
     2001-05-22 file1.txt
     2001-05-22 file2.txt
@@ -84,6 +88,6 @@ fn list_error_not_in_git_repo() {
     // Run from a temp dir that is NOT a git repo (no init_git call)
     let output = TestHarness::new().run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"]);
 
-    assert_ne!(output.status.code(), Some(0));
+    assert_eq!(output.status.code(), Some(1));
     insta::assert_snapshot!(output.stderr);
 }

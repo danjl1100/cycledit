@@ -19,6 +19,7 @@ fn now_shows_only_past_and_today_chunks() {
         .run_cli("2025-06-01T00:00:00+00:00[UTC]", &["now"]);
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"
     2025-06-01:
     \tfile1.txt
@@ -39,6 +40,7 @@ fn now_empty_when_nothing_due() {
         .run_cli("2025-06-01T00:00:00+00:00[UTC]", &["now"]);
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     assert_eq!(output.stdout, "");
 }
 
@@ -58,6 +60,7 @@ fn check_warn_when_files_due() {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["check"]);
 
     assert_eq!(output.status.code(), Some(100));
+    assert_eq!(output.stderr, "");
     // ceil(7/365) = 1 per chunk; only the first chunk falls on today (1 of 3 files)
     insta::assert_snapshot!(output.stdout, @"WARN: Need to update 1 file(s) now (of 3 files total)\n");
 }
@@ -76,6 +79,7 @@ fn check_pass_when_nothing_due() {
         .run_cli("2025-06-01T00:00:00+00:00[UTC]", &["check"]);
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"PASS: All files up to date\n");
 }
 
@@ -95,6 +99,7 @@ fn current_time_zoned_drives_today() {
         &["now", "--cycle", "P10D"],
     );
     assert_eq!(output_before.status.code(), Some(0));
+    assert_eq!(output_before.stderr, "");
     assert_eq!(output_before.stdout, "", "should be empty before due date");
 
     let output_on = TestHarness::new().init_git(state).run_cli(
@@ -102,6 +107,7 @@ fn current_time_zoned_drives_today() {
         &["now", "--cycle", "P10D"],
     );
     assert_eq!(output_on.status.code(), Some(0));
+    assert_eq!(output_on.stderr, "");
     assert!(
         output_on.stdout.contains("file1.txt"),
         "should show file1 on due date, got: {}",
