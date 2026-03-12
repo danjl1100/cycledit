@@ -32,41 +32,57 @@ impl TestHarness {
     pub fn init_git(self, state: &str) -> Self {
         let dir = self.dir.path();
 
-        // git init
         run_git(dir, &["init", "-b", "main"]);
         run_git(dir, &["config", "user.email", "test@example.com"]);
         run_git(dir, &["config", "user.name", "Test"]);
 
-        let mut current_date: Option<String> = None;
+        enum GitOp {
+            Add(String),
+            Remove(String),
+        }
+
+        // Collect (date, ops) blocks so we commit once per date block.
+        let mut blocks: Vec<(String, Vec<GitOp>)> = vec![];
 
         for raw_line in state.lines() {
             let line = raw_line.trim();
             if line.is_empty() {
                 continue;
             }
-
             if let Some(date) = line.strip_suffix(':') {
-                // validate it looks like a date
-                current_date = Some(date.to_string());
+                blocks.push((date.to_string(), vec![]));
                 continue;
             }
-
-            let date = current_date
-                .as_ref()
-                .expect("file entry before date header");
-
-            if let Some(path_str) = line.strip_prefix('+') {
-                let file_path = dir.join(path_str);
-                std::fs::create_dir_all(file_path.parent().unwrap()).expect("create dirs");
-                // Write unique content so each file gets a unique blob hash
-                std::fs::write(&file_path, format!("{date}:{path_str}")).expect("write file");
-                run_git(dir, &["add", path_str]);
-            } else if let Some(path_str) = line.strip_prefix('-') {
-                run_git(dir, &["rm", "--force", path_str]);
+            let op = if let Some(path) = line.strip_prefix('+') {
+                GitOp::Add(path.to_string())
+            } else if let Some(path) = line.strip_prefix('-') {
+                GitOp::Remove(path.to_string())
             } else {
                 panic!("unexpected line in git state: {line}");
-            }
+            };
+            blocks
+                .last_mut()
+                .expect("file entry before date header")
+                .1
+                .push(op);
+        }
 
+        for (date, ops) in &blocks {
+            for op in ops {
+                match op {
+                    GitOp::Add(path) => {
+                        let file_path = dir.join(path);
+                        std::fs::create_dir_all(file_path.parent().unwrap())
+                            .expect("create dirs");
+                        // Write unique content so each file gets a unique blob hash
+                        std::fs::write(&file_path, format!("{date}:{path}")).expect("write file");
+                        run_git(dir, &["add", path]);
+                    }
+                    GitOp::Remove(path) => {
+                        run_git(dir, &["rm", "--force", path]);
+                    }
+                }
+            }
             let datetime = format!("{date}T12:00:00+00:00");
             run_git_env(
                 dir,
@@ -84,6 +100,20 @@ impl TestHarness {
         }
 
         self
+    }
+
+    /// Returns the number of commits in the repo (for regression testing).
+    pub fn commit_count(&self) -> usize {
+        let output = Command::new("git")
+            .args(["rev-list", "--count", "HEAD"])
+            .current_dir(self.dir.path())
+            .output()
+            .expect("run git rev-list");
+        assert!(output.status.success(), "git rev-list failed");
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .expect("parse commit count")
     }
 
     /// Run the cycledit binary with TZ=UTC, CURRENT_TIME_ZONED=<time>, and the given args.
