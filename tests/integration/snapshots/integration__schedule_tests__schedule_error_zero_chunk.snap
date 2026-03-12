@@ -1,0 +1,5 @@
+---
+source: tests/integration/schedule_tests.rs
+expression: output.stderr
+---
+error: --chunk must be a positive duration, got 'P0D'

@@ -1,5 +1,35 @@
 use crate::common::TestHarness;
 
+#[test]
+fn schedule_error_zero_cycle() {
+    let output = TestHarness::new()
+        .init_git(
+            "
+            2001-05-22:
+            +file1.txt
+            ",
+        )
+        .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule", "--cycle", "P0D"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    insta::assert_snapshot!(output.stderr);
+}
+
+#[test]
+fn schedule_error_zero_chunk() {
+    let output = TestHarness::new()
+        .init_git(
+            "
+            2001-05-22:
+            +file1.txt
+            ",
+        )
+        .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule", "--chunk", "P0D"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    insta::assert_snapshot!(output.stderr);
+}
+
 /// All files modified far in the past → all overdue → clamp to today,
 /// then schedule across chunks starting from today.
 #[test]
@@ -18,6 +48,7 @@ fn schedule_all_overdue_lands_in_today() {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule"]);
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     // Each file gets its own chunk; all overdue, so they start at today.
     let date_headers: Vec<_> = output.stdout.lines().filter(|l| l.ends_with(':')).collect();
     assert_eq!(date_headers.len(), 3, "expected 3 chunks (1 per file)");
@@ -49,6 +80,7 @@ fn schedule_future_dates() {
         .run_cli("2025-06-01T00:00:00+00:00[UTC]", &["schedule"]);
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"
     2026-01-01:
     \tfile1.txt
@@ -75,6 +107,7 @@ fn schedule_custom_cycle_and_chunk() {
         );
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"
     2024-01-31:
     \tfile1.txt
@@ -107,7 +140,9 @@ fn schedule_same_date_deterministic_order() {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule"]);
 
     assert_eq!(output1.status.code(), Some(0));
+    assert_eq!(output1.stderr, "");
     assert_eq!(output2.status.code(), Some(0));
+    assert_eq!(output2.stderr, "");
     // Both runs should produce the same output
     assert_eq!(output1.stdout, output2.stdout);
     // Should have both files scheduled on the same date (all overdue → today)
@@ -137,6 +172,7 @@ fn schedule_overflow_to_next_chunk() {
         );
 
     assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
     // Both files should appear, in two separate chunks
     assert!(output.stdout.contains("file1.txt"));
     assert!(output.stdout.contains("file2.txt"));

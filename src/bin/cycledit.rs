@@ -66,6 +66,14 @@ fn parse_span_days(s: &str, ref_date: jiff::civil::Date) -> eyre::Result<i64> {
     Ok(days)
 }
 
+fn parse_positive_span_days(s: &str, arg: &str, ref_date: jiff::civil::Date) -> eyre::Result<i64> {
+    let days = parse_span_days(s, ref_date)?;
+    if days <= 0 {
+        eyre::bail!("--{arg} must be a positive duration, got '{s}'");
+    }
+    Ok(days)
+}
+
 fn find_repo_root() -> eyre::Result<std::path::PathBuf> {
     let cwd = std::env::current_dir()?;
     // Walk up to find .git
@@ -114,8 +122,8 @@ fn run() -> eyre::Result<i32> {
             let root = find_repo_root()?;
             let today = today()?;
             let entries = git::list_files(&root, &pathspecs, &excludes)?;
-            let cycle_days = parse_span_days(&cycle, today)?;
-            let chunk_days = parse_span_days(&chunk, today)?;
+            let cycle_days = parse_positive_span_days(&cycle, "cycle", today)?;
+            let chunk_days = parse_positive_span_days(&chunk, "chunk", today)?;
             let schedule =
                 cycledit::schedule::compute_schedule(entries, cycle_days, chunk_days, today);
             for (date, files) in &schedule {
@@ -132,8 +140,8 @@ fn run() -> eyre::Result<i32> {
             let root = find_repo_root()?;
             let today = today()?;
             let entries = git::list_files(&root, &pathspecs, &excludes)?;
-            let cycle_days = parse_span_days(&cycle, today)?;
-            let chunk_days = parse_span_days(&chunk, today)?;
+            let cycle_days = parse_positive_span_days(&cycle, "cycle", today)?;
+            let chunk_days = parse_positive_span_days(&chunk, "chunk", today)?;
             let schedule =
                 cycledit::schedule::compute_schedule(entries, cycle_days, chunk_days, today);
             for (date, files) in schedule.iter().filter(|(d, _)| **d <= today) {
@@ -151,8 +159,8 @@ fn run() -> eyre::Result<i32> {
             let today = today()?;
             let entries = git::list_files(&root, &pathspecs, &excludes)?;
             let total = entries.len();
-            let cycle_days = parse_span_days(&cycle, today)?;
-            let chunk_days = parse_span_days(&chunk, today)?;
+            let cycle_days = parse_positive_span_days(&cycle, "cycle", today)?;
+            let chunk_days = parse_positive_span_days(&chunk, "chunk", today)?;
             let schedule =
                 cycledit::schedule::compute_schedule(entries, cycle_days, chunk_days, today);
             let due: usize = schedule
