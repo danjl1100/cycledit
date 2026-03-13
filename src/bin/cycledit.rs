@@ -1,5 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use cycledit::git;
+use eyre::WrapErr;
 
 #[derive(Parser)]
 #[command(name = "cycledit")]
@@ -44,7 +45,7 @@ fn today() -> eyre::Result<jiff::civil::Date> {
     if let Ok(val) = std::env::var("CURRENT_TIME_ZONED") {
         let zoned: jiff::Zoned = val
             .parse()
-            .map_err(|e| eyre::eyre!("invalid CURRENT_TIME_ZONED: {e}"))?;
+            .wrap_err("invalid CURRENT_TIME_ZONED")?;
         Ok(zoned.date())
     } else {
         Ok(jiff::Zoned::now().date())
@@ -54,13 +55,13 @@ fn today() -> eyre::Result<jiff::civil::Date> {
 fn parse_span_days(s: &str, ref_date: jiff::civil::Date) -> eyre::Result<i64> {
     let span: jiff::Span = s
         .parse()
-        .map_err(|e| eyre::eyre!("invalid duration '{s}': {e}"))?;
+        .wrap_err_with(|| format!("invalid duration '{s}'"))?;
     let end = ref_date
         .checked_add(span)
-        .map_err(|e| eyre::eyre!("duration overflow: {e}"))?;
+        .wrap_err("duration overflow")?;
     let days = ref_date
         .until(end)
-        .map_err(|e| eyre::eyre!("duration conversion: {e}"))?
+        .wrap_err("duration conversion")?
         .get_days()
         .into();
     Ok(days)

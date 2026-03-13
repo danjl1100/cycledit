@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use eyre::WrapErr;
 use gix::ObjectId;
 use gix::bstr::ByteSlice;
 use jiff::civil::Date;
@@ -22,11 +23,11 @@ pub fn list_files(
     excludes: &[String],
 ) -> eyre::Result<Vec<FileEntry>> {
     let repo = gix::discover(directory)
-        .map_err(|e| eyre::eyre!("{e}"))?;
+        .wrap_err("failed to discover git repository")?;
 
     let head_id = repo
         .head_id()
-        .map_err(|e| eyre::eyre!("failed to resolve HEAD: {e}"))?;
+        .wrap_err("failed to resolve HEAD")?;
 
     // Map from path -> (date, blob_hash) for most recent commit that CHANGED each file.
     let mut file_dates: HashMap<String, (Date, ObjectId)> = HashMap::new();
@@ -35,26 +36,26 @@ pub fn list_files(
     let commits: Vec<_> = repo
         .rev_walk([head_id])
         .all()
-        .map_err(|e| eyre::eyre!("rev-walk failed: {e}"))?
+        .wrap_err("rev-walk failed")?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| eyre::eyre!("rev-walk iteration failed: {e}"))?;
+        .wrap_err("rev-walk iteration failed")?;
 
     for info in &commits {
         let commit = repo
             .find_object(info.id)
-            .map_err(|e| eyre::eyre!("find commit: {e}"))?
+            .wrap_err("find commit")?
             .try_into_commit()
-            .map_err(|_| eyre::eyre!("not a commit: {}", info.id))?;
+            .wrap_err_with(|| format!("not a commit: {}", info.id))?;
 
-        let commit_time = commit.time().map_err(|e| eyre::eyre!("commit time: {e}"))?;
+        let commit_time = commit.time().wrap_err("commit time")?;
         let date = jiff::Timestamp::from_second(commit_time.seconds as i64)
-            .map_err(|e| eyre::eyre!("timestamp: {e}"))?
+            .wrap_err("timestamp")?
             .to_zoned(jiff::tz::TimeZone::UTC)
             .date();
 
         let tree_id = commit
             .tree()
-            .map_err(|e| eyre::eyre!("commit tree: {e}"))?
+            .wrap_err("commit tree")?
             .id;
         let current_blobs = walk_tree_blobs(&repo, tree_id)?;
 
@@ -63,23 +64,23 @@ pub fn list_files(
         let parent_id: Option<ObjectId> = {
             let decoded = commit
                 .decode()
-                .map_err(|e| eyre::eyre!("decode commit: {e}"))?;
+                .wrap_err("decode commit")?;
             decoded
                 .parents
                 .first()
                 .map(|hex| gix::ObjectId::from_hex(hex))
                 .transpose()
-                .map_err(|e| eyre::eyre!("parse parent id: {e}"))?
+                .wrap_err("parse parent id")?
         };
         let parent_blobs: HashMap<String, ObjectId> = if let Some(pid) = parent_id {
             let parent_commit = repo
                 .find_object(pid)
-                .map_err(|e| eyre::eyre!("find parent: {e}"))?
+                .wrap_err("find parent")?
                 .try_into_commit()
-                .map_err(|_| eyre::eyre!("parent not a commit"))?;
+                .wrap_err("parent not a commit")?;
             let parent_tree_id = parent_commit
                 .tree()
-                .map_err(|e| eyre::eyre!("parent tree: {e}"))?
+                .wrap_err("parent tree")?
                 .id;
             walk_tree_blobs(&repo, parent_tree_id)?
         } else {
@@ -124,16 +125,16 @@ fn walk_tree_blobs(
     while let Some((prefix, tid)) = stack.pop() {
         let tree = repo
             .find_object(tid)
-            .map_err(|e| eyre::eyre!("find tree obj: {e}"))?
+            .wrap_err("find tree obj")?
             .try_into_tree()
-            .map_err(|_| eyre::eyre!("not a tree: {tid}"))?;
+            .wrap_err_with(|| format!("not a tree: {tid}"))?;
 
         for entry in tree.iter() {
-            let entry = entry.map_err(|e| eyre::eyre!("tree entry: {e}"))?;
+            let entry = entry.wrap_err("tree entry")?;
             let name = entry
                 .filename()
                 .to_str()
-                .map_err(|_| eyre::eyre!("non-utf8 filename"))?
+                .wrap_err("non-utf8 filename")?
                 .to_string();
             let full_path = if prefix.is_empty() {
                 name
