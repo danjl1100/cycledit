@@ -68,6 +68,13 @@ impl TestHarness {
         }
 
         for (date, ops) in &blocks {
+            assert!(
+                !ops.is_empty(),
+                "init_git: date block {date:?} has no file operations — every commit must change files"
+            );
+        }
+
+        for (date, ops) in &blocks {
             for op in ops {
                 match op {
                     GitOp::Add(path) => {
@@ -88,7 +95,6 @@ impl TestHarness {
                 dir,
                 &[
                     "commit",
-                    "--allow-empty",
                     "-m",
                     &format!("commit on {date}"),
                 ],
