@@ -143,7 +143,7 @@ use gix::actor::{Signature, Time};
 use gix::date::time::Sign;
 use gix::objs::Commit;
 
-// replaces: run_git_env(dir, &["commit", "--allow-empty", "-m", ...], &[("GIT_COMMITTER_DATE", ...), ...])
+// replaces: run_git_env(dir, &["commit", "-m", ...], &[("GIT_COMMITTER_DATE", ...), ...])
 
 // Parse date string "2001-05-22" to Unix timestamp (seconds since epoch).
 // The project uses `jiff`, so:
@@ -231,7 +231,3 @@ directly — no separate dev-dependency needed.
   / `repo.odb.write(...)`? Verify against 0.70 source.
 - What is the exact set of additional features required?
 
-## Relationship to Other Issues
-
-- Issue 09 eliminates `--allow-empty` commits (date blocks with no file ops), removing
-  one special case from the gix commit path (same-tree parent commits).
