@@ -74,7 +74,7 @@ fn parse_positive_span_days(s: &str, arg: &str, ref_date: jiff::civil::Date) -> 
 fn print_schedule_chunk(date: jiff::civil::Date, files: &[git::FileEntry]) {
     println!("{date}:");
     for f in files {
-        println!("\t{}", f.path.display());
+        println!("\t{}", f.get_path().display());
     }
 }
 
@@ -89,7 +89,7 @@ fn run() -> eyre::Result<i32> {
         } => {
             let entries = git::list_files(&cwd, &pathspecs, &excludes)?;
             for entry in &entries {
-                println!("{} {}", entry.date, entry.path.display());
+                println!("{} {}", entry.get_date(), entry.get_path().display());
             }
         }
 
