@@ -3,10 +3,6 @@ name = "cycledit"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "cycledit"
-path = "src/bin/cycledit.rs"
-
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 glob-match = "0.2"
