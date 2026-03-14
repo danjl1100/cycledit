@@ -54,16 +54,16 @@ pub fn dump_fixture_string(path: &Path) -> eyre::Result<String> {
             }
         };
 
-        let mut diff_lines: Vec<String> = vec![];
+        let mut diff_lines: Vec<(char, &str)> = vec![];
 
         for (p, blob) in &current_blobs {
             if parent_blobs.get(p) != Some(blob) {
-                diff_lines.push(format!("+{p}"));
+                diff_lines.push(('+', p));
             }
         }
         for p in parent_blobs.keys() {
             if !current_blobs.contains_key(p) {
-                diff_lines.push(format!("-{p}"));
+                diff_lines.push(('-', p));
             }
         }
 
@@ -71,10 +71,11 @@ pub fn dump_fixture_string(path: &Path) -> eyre::Result<String> {
             continue;
         }
 
-        diff_lines.sort_by(|a, b| a[1..].cmp(&b[1..]));
+        diff_lines.sort_by_key(|(_, line)| *line);
 
         output.push_str(&format!("\n{date}:\n"));
-        for line in &diff_lines {
+        for (symbol, line) in &diff_lines {
+            output.push(*symbol);
             output.push_str(line);
             output.push('\n');
         }
