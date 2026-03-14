@@ -105,7 +105,7 @@ pub fn list_files(
 }
 
 /// Walk a git tree recursively and return a map of path → blob ObjectId.
-fn walk_tree_blobs(
+pub(crate) fn walk_tree_blobs(
     repo: &gix::Repository,
     tree_id: ObjectId,
 ) -> eyre::Result<HashMap<String, ObjectId>> {

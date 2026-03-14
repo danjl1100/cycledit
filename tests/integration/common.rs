@@ -103,6 +103,10 @@ impl TestHarness {
         self
     }
 
+    pub fn dump_fixture(&self) -> String {
+        cycledit::fixture::dump_fixture_string(self.dir.path()).expect("dump_fixture_string failed")
+    }
+
     /// Returns the number of commits in the repo (for regression testing).
     pub fn commit_count(&self) -> usize {
         let output = Command::new("git")
