@@ -36,9 +36,9 @@ impl TestHarness {
         run_git(dir, &["config", "user.email", "test@example.com"]);
         run_git(dir, &["config", "user.name", "Test"]);
 
-        enum GitOp {
-            Add(String),
-            Remove(String),
+        enum GitOp<'a> {
+            Add(&'a str),
+            Remove(&'a str),
         }
 
         // Collect (date, ops) blocks so we commit once per date block.
@@ -54,9 +54,9 @@ impl TestHarness {
                 continue;
             }
             let op = if let Some(path) = line.strip_prefix('+') {
-                GitOp::Add(path.to_string())
+                GitOp::Add(path)
             } else if let Some(path) = line.strip_prefix('-') {
-                GitOp::Remove(path.to_string())
+                GitOp::Remove(path)
             } else {
                 panic!("unexpected line in git state: {line}");
             };
