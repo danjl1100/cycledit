@@ -39,7 +39,7 @@ All `map_err(|e| eyre::eyre!("...: {e}"))` calls in `src/git.rs` and
 - `map_err(|_| eyre::eyre!("not a commit: {}", info.id))` — intentionally suppresses
   the error to include `info.id` instead; use `.map_err(|_| eyre::eyre!(...))` or
   `wrap_err_with(|| format!(...))` depending on whether the source error is useful.
-  - for any cases where the source error will be discarded, interview the user the user first to confirm they approve (e.g. can group many similar cases together for efficient AskUserQuestion use that still touches on all instances)
+  - for any cases where the source error is currently discarded, figure out what info is being disarded. Create a recommendation for whether to include or discard the source error, then interview the user to confirm they approve (e.g. can group many similar cases together for efficient AskUserQuestion use that still touches on all instances)
 - `eyre::bail!(...)` calls are already idiomatic.
 
 ## Required change

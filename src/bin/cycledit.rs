@@ -43,9 +43,7 @@ enum Commands {
 
 fn today() -> eyre::Result<jiff::civil::Date> {
     if let Ok(val) = std::env::var("CURRENT_TIME_ZONED") {
-        let zoned: jiff::Zoned = val
-            .parse()
-            .wrap_err("invalid CURRENT_TIME_ZONED")?;
+        let zoned: jiff::Zoned = val.parse().wrap_err("invalid CURRENT_TIME_ZONED")?;
         Ok(zoned.date())
     } else {
         Ok(jiff::Zoned::now().date())
@@ -56,9 +54,7 @@ fn parse_span_days(s: &str, ref_date: jiff::civil::Date) -> eyre::Result<i64> {
     let span: jiff::Span = s
         .parse()
         .wrap_err_with(|| format!("invalid duration '{s}'"))?;
-    let end = ref_date
-        .checked_add(span)
-        .wrap_err("duration overflow")?;
+    let end = ref_date.checked_add(span).wrap_err("duration overflow")?;
     let days = ref_date
         .until(end)
         .wrap_err("duration conversion")?
