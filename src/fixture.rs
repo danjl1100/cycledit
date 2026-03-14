@@ -73,12 +73,11 @@ pub fn dump_fixture_string(path: &Path) -> eyre::Result<String> {
 
         diff_lines.sort_by(|a, b| a[1..].cmp(&b[1..]));
 
-        output.push_str(&format!("{date}:\n"));
+        output.push_str(&format!("\n{date}:\n"));
         for line in &diff_lines {
             output.push_str(line);
             output.push('\n');
         }
-        output.push('\n');
     }
 
     Ok(output)
