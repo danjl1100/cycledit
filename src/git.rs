@@ -148,43 +148,53 @@ pub(crate) fn walk_tree_blobs(
 
 /// Simple glob matching against file path or filename.
 fn matches_glob(pattern: &str, path: &str) -> bool {
-    glob_match(pattern, path)
+    glob_match::glob_match(pattern, path)
         || PathBuf::from(path)
             .file_name()
             .and_then(|n| n.to_str())
-            .map(|name| glob_match(pattern, name))
+            .map(|name| glob_match::glob_match(pattern, name))
             .unwrap_or(false)
 }
 
-fn glob_match(pattern: &str, text: &str) -> bool {
-    let pat: Vec<char> = pattern.chars().collect();
-    let txt: Vec<char> = text.chars().collect();
-    glob_match_inner(&pat, &txt)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn glob_match_inner(pat: &[char], txt: &[char]) -> bool {
-    match (pat, txt) {
-        ([], []) => true,
-        ([], _) => false,
-        (['*', '*', rest_pat @ ..], _) => {
-            if glob_match_inner(rest_pat, txt) {
-                return true;
-            }
-            if !txt.is_empty() {
-                return glob_match_inner(pat, &txt[1..]);
-            }
-            false
-        }
-        (['*', rest_pat @ ..], _) => {
-            if glob_match_inner(rest_pat, txt) {
-                return true;
-            }
-            if !txt.is_empty() && txt[0] != '/' {
-                return glob_match_inner(pat, &txt[1..]);
-            }
-            false
-        }
-        ([p, rest_pat @ ..], [t, rest_txt @ ..]) if p == t => glob_match_inner(rest_pat, rest_txt),
-        _ => false,
+    #[test]
+    fn glob_question_mark_matches_single_char() {
+        assert!(matches_glob("file?.txt", "file1.txt"));
+    }
+
+    #[test]
+    fn glob_question_mark_does_not_cross_slash() {
+        assert!(!matches_glob("dir?.txt", "dir/a.txt"));
+    }
+
+    #[test]
+    fn glob_question_mark_does_not_match_empty() {
+        assert!(!matches_glob("file?.txt", "file.txt"));
+    }
+
+    #[test]
+    fn glob_character_class() {
+        assert!(matches_glob("file[0-9].txt", "file3.txt"));
+        assert!(!matches_glob("file[0-9].txt", "filea.txt"));
+    }
+
+    #[test]
+    fn glob_star_does_not_cross_slash() {
+        assert!(!matches_glob("src/*.rs", "src/foo/bar.rs"));
+    }
+
+    #[test]
+    fn glob_double_star_crosses_slash() {
+        assert!(matches_glob("src/**/*.rs", "src/foo/bar.rs"));
+        assert!(matches_glob("src/**/*.rs", "src/foo/baz/qux/bar.rs"));
+        assert!(!matches_glob("src/*/*.rs", "src/foo/baz/bar.rs"));
+    }
+
+    #[test]
+    fn glob_filename_fallback() {
+        assert!(matches_glob("*.rs", "src/main.rs"));
     }
 }
