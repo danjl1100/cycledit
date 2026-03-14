@@ -108,9 +108,8 @@ fn current_time_zoned_drives_today() {
     );
     assert_eq!(output_on.status.code(), Some(0));
     assert_eq!(output_on.stderr, "");
-    assert!(
-        output_on.stdout.contains("file1.txt"),
-        "should show file1 on due date, got: {}",
-        output_on.stdout
-    );
+    insta::assert_snapshot!(output_on.stdout, @"
+    2024-01-11:
+    \tfile1.txt
+    ");
 }
