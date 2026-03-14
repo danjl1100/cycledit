@@ -7,8 +7,15 @@ mod git_ops_blocks;
 
 #[derive(Clone, Copy, Debug)]
 enum GitOp<'a> {
-    Add { path: &'a str },
-    Remove { path: &'a str },
+    Add {
+        // `{parent_path}/{name}` or if `parent_path` is empty, just `name`
+        path: &'a str,
+        parent_path: &'a str,
+        name: &'a str,
+    },
+    Remove {
+        path: &'a str,
+    },
 }
 
 pub struct TestHarness {
@@ -22,10 +29,10 @@ pub struct CommandOutput {
 }
 
 impl TestHarness {
-    pub fn new() -> Self {
-        TestHarness {
-            dir: tempfile::TempDir::new().expect("create tempdir"),
-        }
+    pub fn new() -> eyre::Result<Self> {
+        Ok(TestHarness {
+            dir: tempfile::TempDir::new().wrap_err("failed to create tempdir")?,
+        })
     }
 
     /// Parse a git state string and initialize the repo.
@@ -54,50 +61,67 @@ impl<'a> GitOpsBlocks<'a> {
         // Collect (date, ops) blocks so we commit once per date block.
         let mut blocks = Self::default();
 
-        let fail_no_ops = |date| {
-            eyre::eyre!(
-                "date block {date:?} has no file operations - every commit must change files"
-            )
-        };
-
         let mut next_date = None;
         for raw_line in state.lines() {
             let line = raw_line.trim();
             if line.is_empty() {
                 continue;
             }
-            if let Some(date) = line.strip_suffix(':') {
-                let prev_date = next_date.replace(date);
-                if let Some(date) = prev_date {
-                    // consecutive dates specified with no ops in the middle
-                    return Err(fail_no_ops(date));
-                }
-                continue;
-            }
-            let op = if let Some(path) = line.strip_prefix('+') {
-                GitOp::Add { path }
-            } else if let Some(path) = line.strip_prefix('-') {
-                GitOp::Remove { path }
-            } else {
-                eyre::bail!("unexpected line in git state: {line}");
-            };
-            if let Some(date) = next_date.take() {
-                // push date with first operation
-                blocks.push_date(date, op);
-            } else {
-                // push additional operation
-                match blocks.push_op_to_last_date(op) {
-                    Ok(()) => {}
-                    Err(()) => eyre::bail!("file entry before date header: {line:?}"),
-                }
-            }
+            blocks
+                .extend_for_line(line, &mut next_date)
+                .wrap_err_with(|| format!("invalid git fixture line {line:?}"))?;
         }
         if let Some(date) = next_date.take() {
             // trailing date specified with no ops following
-            return Err(fail_no_ops(date));
+            return Err(Self::fail_no_ops(date));
         }
 
         Ok(blocks)
+    }
+    fn fail_no_ops(date: &str) -> eyre::Report {
+        eyre::eyre!("date block {date:?} has no file operations - every commit must change files")
+    }
+    fn extend_for_line(
+        &mut self,
+        line: &'a str,
+        next_date: &mut Option<&'a str>,
+    ) -> eyre::Result<()> {
+        if let Some(date) = line.strip_suffix(':') {
+            let prev_date = next_date.replace(date);
+            if let Some(date) = prev_date {
+                // consecutive dates specified with no ops in the middle
+                return Err(Self::fail_no_ops(date));
+            }
+            return Ok(());
+        }
+        let op = if let Some(path) = line.strip_prefix('+') {
+            let (parent_path, name) = path.rsplit_once('/').unwrap_or(("", path));
+            if name.is_empty() {
+                eyre::bail!(
+                    "empty filename: {path:?} -> parent_path {parent_path:?}, name {name:?}"
+                );
+            }
+            GitOp::Add {
+                path,
+                parent_path,
+                name,
+            }
+        } else if let Some(path) = line.strip_prefix('-') {
+            GitOp::Remove { path }
+        } else {
+            eyre::bail!("expected '+' or '-' filename prefix, or ':' date suffix");
+        };
+        if let Some(date) = next_date.take() {
+            // push date with first operation
+            self.push_date(date, op);
+            Ok(())
+        } else {
+            // push additional operation
+            match self.push_op_to_last_date(op) {
+                Ok(()) => Ok(()),
+                Err(()) => eyre::bail!("file entry before date header"),
+            }
+        }
     }
 }
 impl TestHarness {
@@ -111,15 +135,27 @@ impl TestHarness {
         for (date, ops) in blocks.iter() {
             for op in ops {
                 match op {
-                    GitOp::Add { path } => {
-                        let file_path = dir.join(path);
-                        std::fs::create_dir_all(file_path.parent().unwrap()).wrap_err_with(
-                            || format!("failed create dirs for {}", file_path.display()),
-                        )?;
+                    GitOp::Add {
+                        path,
+                        parent_path,
+                        name,
+                    } => {
+                        let parent_path_abs = dir.join(parent_path);
+                        std::fs::create_dir_all(&parent_path_abs).wrap_err_with(|| {
+                            format!(
+                                "failed create dirs {} (for path {parent_path:?}, name {name:?})",
+                                parent_path_abs.display()
+                            )
+                        })?;
+
                         // Write unique content so each file gets a unique blob hash
-                        std::fs::write(&file_path, format!("{date}:{path}")).wrap_err_with(
-                            || format!("failed to write file {}", file_path.display()),
-                        )?;
+                        let contents = format!("{date}:{path}");
+
+                        let file_path_abs = parent_path_abs.join(name);
+                        std::fs::write(&file_path_abs, contents).wrap_err_with(|| {
+                            format!("failed to write file {}", file_path_abs.display())
+                        })?;
+
                         run_git(dir, &["add", path])?;
                     }
                     GitOp::Remove { path } => {
@@ -147,17 +183,19 @@ impl TestHarness {
     }
 
     /// Returns the number of commits in the repo (for regression testing).
-    pub fn commit_count(&self) -> usize {
+    pub fn commit_count(&self) -> eyre::Result<usize> {
         let output = Command::new("git")
             .args(["rev-list", "--count", "HEAD"])
             .current_dir(self.dir.path())
             .output()
-            .expect("run git rev-list");
+            .wrap_err("failed to run git rev-list")?;
         assert!(output.status.success(), "git rev-list failed");
-        String::from_utf8_lossy(&output.stdout)
+        let output = String::from_utf8_lossy(&output.stdout);
+        let count: usize = output
             .trim()
             .parse()
-            .expect("parse commit count")
+            .wrap_err_with(|| format!("invalid git rev-list output: {output:?}"))?;
+        Ok(count)
     }
 
     /// Run the cycledit binary with TZ=UTC, CURRENT_TIME_ZONED=<time>, and the given args.

@@ -2,7 +2,7 @@ use crate::common::TestHarness;
 
 #[test]
 fn list_single_file() -> eyre::Result<()> {
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
@@ -19,7 +19,7 @@ fn list_single_file() -> eyre::Result<()> {
 
 #[test]
 fn list_multiple_sorted_lexicographically() -> eyre::Result<()> {
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
@@ -42,7 +42,7 @@ fn list_multiple_sorted_lexicographically() -> eyre::Result<()> {
 
 #[test]
 fn list_pathspec_filter() -> eyre::Result<()> {
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
@@ -64,7 +64,7 @@ fn list_pathspec_filter() -> eyre::Result<()> {
 
 #[test]
 fn list_exclude_filter() -> eyre::Result<()> {
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
@@ -90,7 +90,7 @@ fn list_exclude_filter() -> eyre::Result<()> {
 #[test]
 fn init_git_commits_once_per_date_block() -> eyre::Result<()> {
     // Three files in one date block must produce exactly one commit.
-    let harness = TestHarness::new().init_git(
+    let harness = TestHarness::new()?.init_git(
         "
         2001-05-22:
         +file1.txt
@@ -98,14 +98,14 @@ fn init_git_commits_once_per_date_block() -> eyre::Result<()> {
         +file3.txt
         ",
     )?;
-    assert_eq!(harness.commit_count(), 1);
+    assert_eq!(harness.commit_count()?, 1);
     Ok(())
 }
 
 #[test]
 fn list_error_not_in_git_repo() -> eyre::Result<()> {
     // Run from a temp dir that is NOT a git repo (no init_git call)
-    let output = TestHarness::new().run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"])?;
+    let output = TestHarness::new()?.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"])?;
 
     assert_eq!(output.status.code(), Some(1));
     // Filter the temp path which varies per run.

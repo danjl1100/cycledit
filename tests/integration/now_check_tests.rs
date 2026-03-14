@@ -6,7 +6,7 @@ fn now_shows_only_past_and_today_chunks() -> eyre::Result<()> {
     // file1 modified 2024-01-01 (overdue → clamped to today 2025-06-01)
     // file2 modified 2025-07-01 (future → due 2026-07-01, not shown in `now`)
     // today = 2025-06-01
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2024-01-01:
@@ -31,7 +31,7 @@ fn now_shows_only_past_and_today_chunks() -> eyre::Result<()> {
 #[test]
 fn now_empty_when_nothing_due() -> eyre::Result<()> {
     // file1 modified recently → due in future
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2025-07-01:
@@ -50,7 +50,7 @@ fn now_empty_when_nothing_due() -> eyre::Result<()> {
 #[test]
 fn check_warn_when_files_due() -> eyre::Result<()> {
     // file1 overdue (committed 2001-05-22), today = 2026-01-01
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
@@ -72,7 +72,7 @@ fn check_warn_when_files_due() -> eyre::Result<()> {
 #[test]
 fn check_pass_when_nothing_due() -> eyre::Result<()> {
     // file1 modified recently → due in future
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2025-07-01:
@@ -98,7 +98,7 @@ fn current_time_zoned_drives_today() -> eyre::Result<()> {
         +file1.txt
     ";
 
-    let output_before = TestHarness::new().init_git(state)?.run_cli(
+    let output_before = TestHarness::new()?.init_git(state)?.run_cli(
         "2024-01-10T00:00:00+00:00[UTC]",
         &["now", "--cycle", "P10D"],
     )?;
@@ -106,7 +106,7 @@ fn current_time_zoned_drives_today() -> eyre::Result<()> {
     assert_eq!(output_before.stderr, "");
     assert_eq!(output_before.stdout, "", "should be empty before due date");
 
-    let output_on = TestHarness::new().init_git(state)?.run_cli(
+    let output_on = TestHarness::new()?.init_git(state)?.run_cli(
         "2024-01-11T00:00:00+00:00[UTC]",
         &["now", "--cycle", "P10D"],
     )?;

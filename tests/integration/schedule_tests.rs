@@ -2,7 +2,7 @@ use crate::common::TestHarness;
 
 #[test]
 fn schedule_error_zero_cycle() -> eyre::Result<()> {
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
@@ -21,7 +21,7 @@ fn schedule_error_zero_cycle() -> eyre::Result<()> {
 
 #[test]
 fn schedule_error_zero_chunk() -> eyre::Result<()> {
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
@@ -44,7 +44,7 @@ fn schedule_error_zero_chunk() -> eyre::Result<()> {
 fn schedule_all_overdue_lands_in_today() -> eyre::Result<()> {
     // 3 files all committed 2001-05-22, cycle=1yr, chunk=7d
     // max_per_chunk = ceil(7/365) = 1, so each file gets its own chunk
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
@@ -74,7 +74,7 @@ fn schedule_future_dates() -> eyre::Result<()> {
     // file1 modified 2025-01-01, file2 modified 2025-07-01
     // cycle=1yr → file1 due 2026-01-01, file2 due 2026-07-01
     // today = 2025-06-01 (both in future)
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2025-01-01:
@@ -102,7 +102,7 @@ fn schedule_future_dates() -> eyre::Result<()> {
 fn schedule_custom_cycle_and_chunk() -> eyre::Result<()> {
     // file1 modified 2024-01-01, cycle=P30D, chunk=P10D → due 2024-01-31
     // today = 2023-06-01 (future)
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2024-01-01:
@@ -127,7 +127,7 @@ fn schedule_custom_cycle_and_chunk() -> eyre::Result<()> {
 /// Two files committed same date → order must be stable run-to-run (deterministic).
 #[test]
 fn schedule_same_date_deterministic_order() -> eyre::Result<()> {
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
@@ -155,7 +155,7 @@ fn schedule_overflow_to_next_chunk() -> eyre::Result<()> {
     // 2 overdue files → each gets its own chunk date
     // today = 2026-01-01
     // file1 chunk: 2026-01-01, file2 chunk: 2026-01-11
-    let output = TestHarness::new()
+    let output = TestHarness::new()?
         .init_git(
             "
             2001-05-22:
