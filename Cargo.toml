@@ -12,7 +12,7 @@ clap = { version = "4", features = ["derive"] }
 glob-match = "0.2"
 jiff = "0.2"
 gix = { version = "0.70", default-features = false, features = ["revision", "index"] }
-eyre = "0.6"
+eyre = { version = "0.6", default-features = false, features = ["auto-install"]} # exclude: track-caller
 
 [dev-dependencies]
 insta = { version = "1", features = ["filters"] }

@@ -157,12 +157,8 @@ fn run() -> eyre::Result<i32> {
     Ok(0)
 }
 
-fn main() {
-    match run() {
-        Ok(code) => std::process::exit(code),
-        Err(e) => {
-            eprintln!("error: {e}");
-            std::process::exit(1);
-        }
-    }
+fn main() -> eyre::Result<std::convert::Infallible> {
+    let exit_code = run()?;
+
+    std::process::exit(exit_code)
 }

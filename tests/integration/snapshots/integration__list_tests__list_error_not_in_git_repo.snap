@@ -2,4 +2,7 @@
 source: tests/integration/list_tests.rs
 expression: output.stderr
 ---
-error: failed to discover git repository
+Error: failed to discover git repository
+
+Caused by:
+    Could not find a git repository in '[PATH]' or in any of its parents within device limits below '/'
