@@ -79,8 +79,7 @@ impl TestHarness {
                 match op {
                     GitOp::Add(path) => {
                         let file_path = dir.join(path);
-                        std::fs::create_dir_all(file_path.parent().unwrap())
-                            .expect("create dirs");
+                        std::fs::create_dir_all(file_path.parent().unwrap()).expect("create dirs");
                         // Write unique content so each file gets a unique blob hash
                         std::fs::write(&file_path, format!("{date}:{path}")).expect("write file");
                         run_git(dir, &["add", path]);
@@ -93,11 +92,7 @@ impl TestHarness {
             let datetime = format!("{date}T12:00:00+00:00");
             run_git_env(
                 dir,
-                &[
-                    "commit",
-                    "-m",
-                    &format!("commit on {date}"),
-                ],
+                &["commit", "-m", &format!("commit on {date}")],
                 &[
                     ("GIT_COMMITTER_DATE", datetime.as_str()),
                     ("GIT_AUTHOR_DATE", datetime.as_str()),

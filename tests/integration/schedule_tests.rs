@@ -9,7 +9,10 @@ fn schedule_error_zero_cycle() {
             +file1.txt
             ",
         )
-        .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule", "--cycle", "P0D"]);
+        .run_cli(
+            "2026-01-01T00:00:00+00:00[UTC]",
+            &["schedule", "--cycle", "P0D"],
+        );
 
     assert_eq!(output.status.code(), Some(1));
     insta::assert_snapshot!(output.stderr);
@@ -24,7 +27,10 @@ fn schedule_error_zero_chunk() {
             +file1.txt
             ",
         )
-        .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule", "--chunk", "P0D"]);
+        .run_cli(
+            "2026-01-01T00:00:00+00:00[UTC]",
+            &["schedule", "--chunk", "P0D"],
+        );
 
     assert_eq!(output.status.code(), Some(1));
     insta::assert_snapshot!(output.stderr);

@@ -22,12 +22,9 @@ pub fn list_files(
     pathspecs: &[String],
     excludes: &[String],
 ) -> eyre::Result<Vec<FileEntry>> {
-    let repo = gix::discover(directory)
-        .wrap_err("failed to discover git repository")?;
+    let repo = gix::discover(directory).wrap_err("failed to discover git repository")?;
 
-    let head_id = repo
-        .head_id()
-        .wrap_err("failed to resolve HEAD")?;
+    let head_id = repo.head_id().wrap_err("failed to resolve HEAD")?;
 
     // Map from path -> (date, blob_hash) for most recent commit that CHANGED each file.
     let mut file_dates: HashMap<String, (Date, ObjectId)> = HashMap::new();
@@ -53,18 +50,13 @@ pub fn list_files(
             .to_zoned(jiff::tz::TimeZone::UTC)
             .date();
 
-        let tree_id = commit
-            .tree()
-            .wrap_err("commit tree")?
-            .id;
+        let tree_id = commit.tree().wrap_err("commit tree")?.id;
         let current_blobs = walk_tree_blobs(&repo, tree_id)?;
 
         // Get parent's blobs for comparison.
         // decoded.parents contains &BStr hex strings; parse to ObjectId first.
         let parent_id: Option<ObjectId> = {
-            let decoded = commit
-                .decode()
-                .wrap_err("decode commit")?;
+            let decoded = commit.decode().wrap_err("decode commit")?;
             decoded
                 .parents
                 .first()
@@ -78,10 +70,7 @@ pub fn list_files(
                 .wrap_err("find parent")?
                 .try_into_commit()
                 .wrap_err("parent not a commit")?;
-            let parent_tree_id = parent_commit
-                .tree()
-                .wrap_err("parent tree")?
-                .id;
+            let parent_tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
             walk_tree_blobs(&repo, parent_tree_id)?
         } else {
             HashMap::new()
