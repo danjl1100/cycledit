@@ -1,3 +1,4 @@
+use eyre::Context as _;
 use std::process::{Command, Output};
 
 pub struct TestHarness {
@@ -29,12 +30,12 @@ impl TestHarness {
     /// -root-file.txt
     /// +file2.txt
     /// ```
-    pub fn init_git(self, state: &str) -> Self {
+    pub fn init_git(self, state: &str) -> eyre::Result<Self> {
         let dir = self.dir.path();
 
-        run_git(dir, &["init", "-b", "main"]);
-        run_git(dir, &["config", "user.email", "test@example.com"]);
-        run_git(dir, &["config", "user.name", "Test"]);
+        run_git(dir, &["init", "-b", "main"])?;
+        run_git(dir, &["config", "user.email", "test@example.com"])?;
+        run_git(dir, &["config", "user.name", "Test"])?;
 
         enum GitOp<'a> {
             Add(&'a str),
@@ -58,20 +59,20 @@ impl TestHarness {
             } else if let Some(path) = line.strip_prefix('-') {
                 GitOp::Remove(path)
             } else {
-                panic!("unexpected line in git state: {line}");
+                eyre::bail!("unexpected line in git state: {line}");
             };
-            blocks
-                .last_mut()
-                .expect("file entry before date header")
-                .1
-                .push(op);
+            let Some(last) = blocks.last_mut() else {
+                eyre::bail!("file entry before date header: {line:?}")
+            };
+            last.1.push(op);
         }
 
         for (date, ops) in &blocks {
-            assert!(
-                !ops.is_empty(),
-                "init_git: date block {date:?} has no file operations — every commit must change files"
-            );
+            if ops.is_empty() {
+                eyre::bail!(
+                    "date block {date:?} has no file operations — every commit must change files"
+                );
+            }
         }
 
         for (date, ops) in &blocks {
@@ -79,13 +80,17 @@ impl TestHarness {
                 match op {
                     GitOp::Add(path) => {
                         let file_path = dir.join(path);
-                        std::fs::create_dir_all(file_path.parent().unwrap()).expect("create dirs");
+                        std::fs::create_dir_all(file_path.parent().unwrap()).wrap_err_with(
+                            || format!("failed create dirs for {}", file_path.display()),
+                        )?;
                         // Write unique content so each file gets a unique blob hash
-                        std::fs::write(&file_path, format!("{date}:{path}")).expect("write file");
-                        run_git(dir, &["add", path]);
+                        std::fs::write(&file_path, format!("{date}:{path}")).wrap_err_with(
+                            || format!("failed to write file {}", file_path.display()),
+                        )?;
+                        run_git(dir, &["add", path])?;
                     }
                     GitOp::Remove(path) => {
-                        run_git(dir, &["rm", "--force", path]);
+                        run_git(dir, &["rm", "--force", path])?;
                     }
                 }
             }
@@ -97,14 +102,15 @@ impl TestHarness {
                     ("GIT_COMMITTER_DATE", datetime.as_str()),
                     ("GIT_AUTHOR_DATE", datetime.as_str()),
                 ],
-            );
+            )?;
         }
 
-        self
+        Ok(self)
     }
 
-    pub fn dump_fixture(&self) -> String {
-        cycledit::fixture::dump_fixture_string(self.dir.path()).expect("dump_fixture_string failed")
+    pub fn dump_fixture(&self) -> eyre::Result<String> {
+        cycledit::fixture::dump_fixture_string(self.dir.path())
+            .wrap_err("dump_fixture_string failed")
     }
 
     /// Returns the number of commits in the repo (for regression testing).
@@ -122,7 +128,7 @@ impl TestHarness {
     }
 
     /// Run the cycledit binary with TZ=UTC, CURRENT_TIME_ZONED=<time>, and the given args.
-    pub fn run_cli(self, time: &str, args: &[&str]) -> CommandOutput {
+    pub fn run_cli(self, time: &str, args: &[&str]) -> eyre::Result<CommandOutput> {
         let binary = env!("CARGO_BIN_EXE_cycledit");
         let output: Output = Command::new(binary)
             .args(args)
@@ -133,26 +139,32 @@ impl TestHarness {
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", std::env::var("HOME").unwrap_or_default())
             .output()
-            .expect("run cycledit binary");
+            .wrap_err("failed to run cycledit binary")?;
 
-        CommandOutput {
+        Ok(CommandOutput {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             status: output.status,
-        }
+        })
     }
 }
 
-fn run_git(dir: &std::path::Path, args: &[&str]) {
-    run_git_env(dir, args, &[]);
+fn run_git(dir: &std::path::Path, args: &[&str]) -> eyre::Result<()> {
+    run_git_env(dir, args, &[])
 }
 
-fn run_git_env(dir: &std::path::Path, args: &[&str], env: &[(&str, &str)]) {
+fn run_git_env(dir: &std::path::Path, args: &[&str], env: &[(&str, &str)]) -> eyre::Result<()> {
     let mut cmd = Command::new("git");
     cmd.args(args).current_dir(dir);
     for (k, v) in env {
         cmd.env(k, v);
     }
-    let status = cmd.status().expect("run git");
-    assert!(status.success(), "git {args:?} failed in {dir:?}");
+    let status = cmd
+        .status()
+        .wrap_err("failed to run git {args:?} in {dir:?}")?;
+    if status.success() {
+        Ok(())
+    } else {
+        eyre::bail!("git {args:?} failed in {dir:?}: {status:?}")
+    }
 }
