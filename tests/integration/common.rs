@@ -1,6 +1,10 @@
 use eyre::Context as _;
 use std::process::{Command, Output};
 
+use self::git_ops_blocks::GitOpsBlocks;
+
+mod git_ops_blocks;
+
 #[derive(Clone, Copy, Debug)]
 enum GitOp<'a> {
     Add { path: &'a str },
@@ -36,23 +40,38 @@ impl TestHarness {
     /// -root-file.txt
     /// +file2.txt
     /// ```
-    pub fn init_git<'a>(self, state: &'a str) -> eyre::Result<Self> {
-        let dir = self.dir.path();
-
-        run_git(dir, &["init", "-b", "main"])?;
-        run_git(dir, &["config", "user.email", "test@example.com"])?;
-        run_git(dir, &["config", "user.name", "Test"])?;
-
+    pub fn init_git(self, state: &str) -> eyre::Result<Self> {
+        // parse input, reporting full input on error
+        let blocks = GitOpsBlocks::from_str(state).wrap_err_with(|| {
+            format!("invalid input for init_git:\n--------\n{state}\n---END---")
+        })?;
+        // perform I/O
+        self.init_git_io(blocks).wrap_err("init_git I/O failed")
+    }
+}
+impl<'a> GitOpsBlocks<'a> {
+    fn from_str(state: &'a str) -> eyre::Result<Self> {
         // Collect (date, ops) blocks so we commit once per date block.
-        let mut blocks: Vec<(&'a str, Vec<GitOp<'a>>)> = vec![];
+        let mut blocks = Self::default();
 
+        let fail_no_ops = |date| {
+            eyre::eyre!(
+                "date block {date:?} has no file operations - every commit must change files"
+            )
+        };
+
+        let mut next_date = None;
         for raw_line in state.lines() {
             let line = raw_line.trim();
             if line.is_empty() {
                 continue;
             }
             if let Some(date) = line.strip_suffix(':') {
-                blocks.push((date, vec![]));
+                let prev_date = next_date.replace(date);
+                if let Some(date) = prev_date {
+                    // consecutive dates specified with no ops in the middle
+                    return Err(fail_no_ops(date));
+                }
                 continue;
             }
             let op = if let Some(path) = line.strip_prefix('+') {
@@ -62,21 +81,34 @@ impl TestHarness {
             } else {
                 eyre::bail!("unexpected line in git state: {line}");
             };
-            let Some(last) = blocks.last_mut() else {
-                eyre::bail!("file entry before date header: {line:?}")
-            };
-            last.1.push(op);
-        }
-
-        for (date, ops) in &blocks {
-            if ops.is_empty() {
-                eyre::bail!(
-                    "date block {date:?} has no file operations — every commit must change files"
-                );
+            if let Some(date) = next_date.take() {
+                // push date with first operation
+                blocks.push_date(date, op);
+            } else {
+                // push additional operation
+                match blocks.push_op_to_last_date(op) {
+                    Ok(()) => {}
+                    Err(()) => eyre::bail!("file entry before date header: {line:?}"),
+                }
             }
         }
+        if let Some(date) = next_date.take() {
+            // trailing date specified with no ops following
+            return Err(fail_no_ops(date));
+        }
 
-        for (date, ops) in &blocks {
+        Ok(blocks)
+    }
+}
+impl TestHarness {
+    fn init_git_io(self, blocks: GitOpsBlocks<'_>) -> eyre::Result<Self> {
+        let dir = self.dir.path();
+
+        run_git(dir, &["init", "-b", "main"])?;
+        run_git(dir, &["config", "user.email", "test@example.com"])?;
+        run_git(dir, &["config", "user.name", "Test"])?;
+
+        for (date, ops) in blocks.iter() {
             for op in ops {
                 match op {
                     GitOp::Add { path } => {
