@@ -1,6 +1,12 @@
 use eyre::Context as _;
 use std::process::{Command, Output};
 
+#[derive(Clone, Copy, Debug)]
+enum GitOp<'a> {
+    Add { path: &'a str },
+    Remove { path: &'a str },
+}
+
 pub struct TestHarness {
     dir: tempfile::TempDir,
 }
@@ -30,20 +36,15 @@ impl TestHarness {
     /// -root-file.txt
     /// +file2.txt
     /// ```
-    pub fn init_git(self, state: &str) -> eyre::Result<Self> {
+    pub fn init_git<'a>(self, state: &'a str) -> eyre::Result<Self> {
         let dir = self.dir.path();
 
         run_git(dir, &["init", "-b", "main"])?;
         run_git(dir, &["config", "user.email", "test@example.com"])?;
         run_git(dir, &["config", "user.name", "Test"])?;
 
-        enum GitOp<'a> {
-            Add(&'a str),
-            Remove(&'a str),
-        }
-
         // Collect (date, ops) blocks so we commit once per date block.
-        let mut blocks: Vec<(String, Vec<GitOp>)> = vec![];
+        let mut blocks: Vec<(&'a str, Vec<GitOp<'a>>)> = vec![];
 
         for raw_line in state.lines() {
             let line = raw_line.trim();
@@ -51,13 +52,13 @@ impl TestHarness {
                 continue;
             }
             if let Some(date) = line.strip_suffix(':') {
-                blocks.push((date.to_string(), vec![]));
+                blocks.push((date, vec![]));
                 continue;
             }
             let op = if let Some(path) = line.strip_prefix('+') {
-                GitOp::Add(path)
+                GitOp::Add { path }
             } else if let Some(path) = line.strip_prefix('-') {
-                GitOp::Remove(path)
+                GitOp::Remove { path }
             } else {
                 eyre::bail!("unexpected line in git state: {line}");
             };
@@ -78,7 +79,7 @@ impl TestHarness {
         for (date, ops) in &blocks {
             for op in ops {
                 match op {
-                    GitOp::Add(path) => {
+                    GitOp::Add { path } => {
                         let file_path = dir.join(path);
                         std::fs::create_dir_all(file_path.parent().unwrap()).wrap_err_with(
                             || format!("failed create dirs for {}", file_path.display()),
@@ -89,7 +90,7 @@ impl TestHarness {
                         )?;
                         run_git(dir, &["add", path])?;
                     }
-                    GitOp::Remove(path) => {
+                    GitOp::Remove { path } => {
                         run_git(dir, &["rm", "--force", path])?;
                     }
                 }
