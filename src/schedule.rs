@@ -34,7 +34,14 @@ pub fn compute_schedule(
         let earliest = entry
             .get_date()
             .checked_add(jiff::Span::new().days(cycle_days.get()))?;
-        let mut chunk_date = earliest.max(today);
+        // Snap earliest up to the nearest grid point at or after earliest.
+        // Grid: today + k * chunk_days for k = 0, 1, 2, …
+        // try_from fails (→ 0) for overdue files where days_ahead would be negative.
+        let days_ahead = u32::try_from(earliest.since(today)?.get_days()).unwrap_or(0);
+        let chunk = u32::from(chunk_days.get());
+        let k = days_ahead.div_ceil(chunk);
+        let mut chunk_date =
+            today.checked_add(jiff::Span::new().days(i64::from(k) * i64::from(chunk)))?;
         loop {
             let count = chunk_map.get(&chunk_date).map_or(0, Vec::len);
             if count < max_per_chunk {
