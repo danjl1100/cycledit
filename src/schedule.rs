@@ -12,9 +12,9 @@ pub fn compute_schedule(
 ) -> BTreeMap<Date, Vec<FileEntry>> {
     // Sort by (date ASC, blob_hash ASC) for deterministic scheduling.
     entries.sort_by(|a, b| {
-        a.date
-            .cmp(&b.date)
-            .then_with(|| a.blob_hash.cmp(&b.blob_hash))
+        a.get_date()
+            .cmp(&b.get_date())
+            .then_with(|| a.get_blob_hash().cmp(b.get_blob_hash()))
     });
 
     let max_per_chunk = ((chunk_days + cycle_days - 1) / cycle_days) as usize;
@@ -22,7 +22,7 @@ pub fn compute_schedule(
 
     for entry in entries {
         let earliest = entry
-            .date
+            .get_date()
             .checked_add(jiff::Span::new().days(cycle_days))
             .expect("date arithmetic overflow");
         let mut chunk_date = earliest.max(today);

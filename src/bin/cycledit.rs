@@ -9,12 +9,19 @@ struct Cli {
     command: Commands,
 }
 
-/// Arguments shared by schedule, now, and check subcommands.
+/// Arguments to list entries from [`git`]
 #[derive(Args)]
-struct ScheduleArgs {
+struct ListArgs {
+    /// Paths/globs to include (default: all)
     pathspecs: Vec<String>,
+    /// Paths/globs to exclude
     #[arg(long = "exclude")]
     excludes: Vec<String>,
+}
+
+/// Arguments to create the schedule
+#[derive(Args)]
+struct ScheduleArgs {
     /// Total cycle duration (default: 1 year)
     #[arg(long, default_value = "P1Y")]
     cycle: String,
@@ -27,18 +34,30 @@ struct ScheduleArgs {
 enum Commands {
     /// List files with their last-modified date
     List {
-        /// Paths/globs to include (default: all)
-        pathspecs: Vec<String>,
-        /// Paths/globs to exclude
-        #[arg(long = "exclude")]
-        excludes: Vec<String>,
+        #[clap(flatten)]
+        list: ListArgs,
     },
     /// Show the full edit schedule
-    Schedule(ScheduleArgs),
+    Schedule {
+        #[clap(flatten)]
+        list: ListArgs,
+        #[clap(flatten)]
+        schedule: ScheduleArgs,
+    },
     /// Show only files due now (chunk_date <= today)
-    Now(ScheduleArgs),
+    Now {
+        #[clap(flatten)]
+        list: ListArgs,
+        #[clap(flatten)]
+        schedule: ScheduleArgs,
+    },
     /// Check if any files are due; exits 100 if so
-    Check(ScheduleArgs),
+    Check {
+        #[clap(flatten)]
+        list: ListArgs,
+        #[clap(flatten)]
+        schedule: ScheduleArgs,
+    },
 }
 
 fn today() -> eyre::Result<jiff::civil::Date> {
@@ -70,11 +89,31 @@ fn parse_positive_span_days(s: &str, arg: &str, ref_date: jiff::civil::Date) -> 
     }
     Ok(days)
 }
+impl ScheduleArgs {
+    fn parse_span_days(&self, today: jiff::civil::Date) -> eyre::Result<(i64, i64)> {
+        let Self { cycle, chunk } = self;
+        let cycle_days = parse_positive_span_days(cycle, "cycle", today)?;
+        let chunk_days = parse_positive_span_days(chunk, "chunk", today)?;
+
+        // FIXME - change positional arguments to a more strongly-typed pattern
+        Ok((cycle_days, chunk_days))
+    }
+}
+
+impl ListArgs {
+    fn list_files(&self, cwd: &std::path::Path) -> eyre::Result<Vec<git::FileEntry>> {
+        let Self {
+            pathspecs,
+            excludes,
+        } = self;
+        git::list_files(cwd, pathspecs, excludes)
+    }
+}
 
 fn print_schedule_chunk(date: jiff::civil::Date, files: &[git::FileEntry]) {
     println!("{date}:");
     for f in files {
-        println!("\t{}", f.path.display());
+        println!("\t{}", f.get_path().display());
     }
 }
 
@@ -83,26 +122,18 @@ fn run() -> eyre::Result<i32> {
     let cwd = std::env::current_dir()?;
 
     match cli.command {
-        Commands::List {
-            pathspecs,
-            excludes,
-        } => {
-            let entries = git::list_files(&cwd, &pathspecs, &excludes)?;
+        Commands::List { list } => {
+            let entries = list.list_files(&cwd)?;
             for entry in &entries {
-                println!("{} {}", entry.date, entry.path.display());
+                println!("{} {}", entry.get_date(), entry.get_path().display());
             }
         }
 
-        Commands::Schedule(ScheduleArgs {
-            pathspecs,
-            excludes,
-            cycle,
-            chunk,
-        }) => {
+        Commands::Schedule { list, schedule } => {
             let today = today()?;
-            let entries = git::list_files(&cwd, &pathspecs, &excludes)?;
-            let cycle_days = parse_positive_span_days(&cycle, "cycle", today)?;
-            let chunk_days = parse_positive_span_days(&chunk, "chunk", today)?;
+            let (cycle_days, chunk_days) = schedule.parse_span_days(today)?;
+
+            let entries = list.list_files(&cwd)?;
             let schedule =
                 cycledit::schedule::compute_schedule(entries, cycle_days, chunk_days, today);
             for (date, files) in &schedule {
@@ -110,16 +141,11 @@ fn run() -> eyre::Result<i32> {
             }
         }
 
-        Commands::Now(ScheduleArgs {
-            pathspecs,
-            excludes,
-            cycle,
-            chunk,
-        }) => {
+        Commands::Now { list, schedule } => {
             let today = today()?;
-            let entries = git::list_files(&cwd, &pathspecs, &excludes)?;
-            let cycle_days = parse_positive_span_days(&cycle, "cycle", today)?;
-            let chunk_days = parse_positive_span_days(&chunk, "chunk", today)?;
+            let (cycle_days, chunk_days) = schedule.parse_span_days(today)?;
+
+            let entries = list.list_files(&cwd)?;
             let schedule =
                 cycledit::schedule::compute_schedule(entries, cycle_days, chunk_days, today);
             for (date, files) in schedule.iter().filter(|(d, _)| **d <= today) {
@@ -127,17 +153,13 @@ fn run() -> eyre::Result<i32> {
             }
         }
 
-        Commands::Check(ScheduleArgs {
-            pathspecs,
-            excludes,
-            cycle,
-            chunk,
-        }) => {
+        Commands::Check { list, schedule } => {
             let today = today()?;
-            let entries = git::list_files(&cwd, &pathspecs, &excludes)?;
+            let (cycle_days, chunk_days) = schedule.parse_span_days(today)?;
+
+            let entries = list.list_files(&cwd)?;
             let total = entries.len();
-            let cycle_days = parse_positive_span_days(&cycle, "cycle", today)?;
-            let chunk_days = parse_positive_span_days(&chunk, "chunk", today)?;
+
             let schedule =
                 cycledit::schedule::compute_schedule(entries, cycle_days, chunk_days, today);
             let due: usize = schedule
@@ -157,12 +179,8 @@ fn run() -> eyre::Result<i32> {
     Ok(0)
 }
 
-fn main() {
-    match run() {
-        Ok(code) => std::process::exit(code),
-        Err(e) => {
-            eprintln!("error: {e}");
-            std::process::exit(1);
-        }
-    }
+fn main() -> eyre::Result<std::convert::Infallible> {
+    let exit_code = run()?;
+
+    std::process::exit(exit_code)
 }

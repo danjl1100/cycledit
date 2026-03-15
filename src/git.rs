@@ -7,9 +7,20 @@ use gix::bstr::ByteSlice;
 use jiff::civil::Date;
 
 pub struct FileEntry {
-    pub date: Date,
-    pub blob_hash: ObjectId,
-    pub path: PathBuf,
+    date: Date,
+    blob_hash: ObjectId,
+    path: PathBuf,
+}
+impl FileEntry {
+    pub fn get_date(&self) -> Date {
+        self.date
+    }
+    pub fn get_path(&self) -> &std::path::Path {
+        &self.path
+    }
+    pub(crate) fn get_blob_hash(&self) -> &ObjectId {
+        &self.blob_hash
+    }
 }
 
 /// List files tracked in the git index, with the date of the most recent commit

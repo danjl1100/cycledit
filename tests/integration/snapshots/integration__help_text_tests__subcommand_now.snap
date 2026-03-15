@@ -1,0 +1,16 @@
+---
+source: tests/integration/help_text_tests.rs
+expression: stdout
+---
+Show only files due now (chunk_date <= today)
+
+Usage: cycledit now [OPTIONS] [PATHSPECS]...
+
+Arguments:
+  [PATHSPECS]...  Paths/globs to include (default: all)
+
+Options:
+      --exclude <EXCLUDES>  Paths/globs to exclude
+      --cycle <CYCLE>       Total cycle duration (default: 1 year) [default: P1Y]
+      --chunk <CHUNK>       Chunk duration (default: 7 days) [default: P7D]
+  -h, --help                Print help

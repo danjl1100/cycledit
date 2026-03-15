@@ -2,4 +2,4 @@
 source: tests/integration/schedule_tests.rs
 expression: output.stderr
 ---
-error: --cycle must be a positive duration, got 'P0D'
+Error: --cycle must be a positive duration, got 'P0D'
