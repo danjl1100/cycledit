@@ -49,9 +49,12 @@ for the parent's tree — but the parent's tree result is immediately discarded,
 be recomputed as the current tree in the next iteration.
 
 Evaluate whether caching the previous iteration's blob map and reusing it as the next
-iteration's `parent_blobs` is feasible and produces a measurable improvement.  If the
-history is not always linear (merge commits), handle the multi-parent case gracefully
-(e.g. only cache for single-parent commits).
+iteration's `parent_blobs` is feasible and produces a measurable improvement.
+(see metrics added in closed issue 12)
+If the history is not always linear (merge commits), handle the multi-parent case gracefully
+(e.g. only cache a limited amount of parent commits).
+
+Compare against using caching available in the `gix` crate, if not already enabled
 
 This item is marked as a feasibility investigation; implement only if the approach is
 clean and the benefit is clear.

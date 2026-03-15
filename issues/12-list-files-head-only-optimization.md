@@ -20,7 +20,7 @@ files is empty.
 
 ### 3. Pathspec and exclude filters are applied after the full walk
 
-A user passing `--include some/single/file.md` still triggers a full walk over every
+A user passing `some/single/file.md` include pathspec still triggers a full walk over every
 commit in history.  Filters should be applied to the HEAD file list _before_ the commit
 walk begins, so only the files that will actually appear in the output are tracked.
 
@@ -32,6 +32,25 @@ or to catch future regressions.
 
 ## Proposed Changes
 
+### Step 0 — ENV var for walk metrics (snapshot-tested)
+
+Add an optional environment variable (e.g. `CYCLEDIT_LOG_METRICS=1`) that, when set,
+prints to stderr a summary line such as:
+
+```
+metrics: find_object_calls=<N>
+```
+
+Write a snapshot test against a controlled fixture (ideally a multi-commit repo with
+many files, several of which are deleted) that captures this current count before the change.
+TestHarness likely needs a new chainable function to set this env var.
+The snapshot acts as a baseline and future regression guard: the count should decrease
+after the optimizations in the steps below and must not increase in future changes.
+
+Make sure to commit just this test/env change separarely, to document the baseline metric
+in the Git history for comparison in Step 4.
+
+
 ### Step 1 — Build the candidate set from HEAD
 
 After resolving `head_id`, walk only the HEAD tree to collect the initial file set:
@@ -40,6 +59,8 @@ After resolving `head_id`, walk only the HEAD tree to collect the initial file s
 let head_tree_id = /* HEAD commit's tree id */;
 let all_head_files: HashMap<String, ObjectId> = walk_tree_blobs(&repo, head_tree_id)?;
 ```
+    NOTE: if 11-walk-tree-blobs-visitor-pattern.md was implemented (in issues/closed/..)
+    then it changed `walk_tree_blobs` signature/behavior since this issue was created
 
 Apply pathspec and exclude filters to `all_head_files` immediately.  Only the surviving
 paths need modification dates.
@@ -61,19 +82,15 @@ for info in commits_walk {
 If `file_dates.contains_key(path)` then the file was already assigned a date from a
 newer commit; skip it without inspecting the parent tree.
 
-### Step 4 — ENV var for walk metrics (snapshot-tested)
+### Step 4 — Update snapshot for ENV var walk metrics
 
-Add an optional environment variable (e.g. `CYCLEDIT_LOG_METRICS=1`) that, when set,
-prints to stderr a summary line such as:
+Verify the metrics in the snapshot test from Step 0 have decreased by roughly the
+expected amount. If no decrease is seen, re-examine the implementation, and only if
+required, improve the prior commit that captures the baseline behavior (in case the Git
+fixture test case wasn't diabolical enough).
+The implementation commit will capture both the implementation and the metric
+improvements via the updated snapshots.
 
-```
-metrics: find_object_calls=<N>
-```
-
-Write a snapshot test against a controlled fixture (ideally a multi-commit repo with
-many files, several of which are deleted) that captures this count.  The snapshot acts
-as a regression guard: the count should decrease after this optimization and must not
-increase in future changes.
 
 ## Test Updates
 
