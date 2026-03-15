@@ -87,7 +87,7 @@ fn check_pass_when_nothing_due() -> eyre::Result<()> {
     Ok(())
 }
 
-/// CURRENT_TIME_ZONED drives the "today" used for scheduling.
+/// `CURRENT_TIME_ZONED` drives the "today" used for scheduling.
 #[test]
 fn current_time_zoned_drives_today() -> eyre::Result<()> {
     // file1 modified 2024-01-01, cycle=P10D (10 days) → due 2024-01-11

@@ -6,15 +6,20 @@ use gix::ObjectId;
 use gix::bstr::ByteSlice;
 use jiff::civil::Date;
 
+/// File in the Git repository
 pub struct FileEntry {
     date: Date,
     blob_hash: ObjectId,
     path: PathBuf,
 }
 impl FileEntry {
+    /// Returns the date of the last modification (commit) for this file
+    #[must_use]
     pub fn get_date(&self) -> Date {
         self.date
     }
+    /// Returns the path relative to the Git repo root
+    #[must_use]
     pub fn get_path(&self) -> &std::path::Path {
         &self.path
     }
@@ -28,6 +33,9 @@ impl FileEntry {
 ///
 /// `pathspecs` — if non-empty, only files matching at least one spec are included.
 /// `excludes`  — files matching any exclude spec are removed.
+///
+/// # Errors
+/// Returns an error if reading the Git repository fails or it contains invalid data.
 pub fn list_files(
     directory: &std::path::Path,
     pathspecs: &[String],
@@ -115,7 +123,7 @@ pub fn list_files(
     Ok(entries)
 }
 
-/// Walk a git tree recursively and return a map of path → blob ObjectId.
+/// Walk a git tree recursively and return a map of path → blob [`ObjectId`].
 pub(crate) fn walk_tree_blobs(
     repo: &gix::Repository,
     tree_id: ObjectId,
@@ -163,8 +171,7 @@ fn matches_glob(pattern: &str, path: &str) -> bool {
         || PathBuf::from(path)
             .file_name()
             .and_then(|n| n.to_str())
-            .map(|name| glob_match::glob_match(pattern, name))
-            .unwrap_or(false)
+            .is_some_and(|name| glob_match::glob_match(pattern, name))
 }
 
 #[cfg(test)]

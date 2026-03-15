@@ -54,7 +54,7 @@ impl TestHarness {
             format!("invalid input for init_git:\n--------\n{state}\n---END---")
         })?;
         // perform I/O
-        self.init_git_io(blocks).wrap_err("init_git I/O failed")
+        self.init_git_io(&blocks).wrap_err("init_git I/O failed")
     }
 }
 impl<'a> GitOpsBlocks<'a> {
@@ -126,7 +126,7 @@ impl<'a> GitOpsBlocks<'a> {
     }
 }
 impl TestHarness {
-    fn init_git_io(self, blocks: GitOpsBlocks<'_>) -> eyre::Result<Self> {
+    fn init_git_io(self, blocks: &GitOpsBlocks<'_>) -> eyre::Result<Self> {
         let dir = self.dir.path();
 
         run_git(dir, &["init", "-b", "main"])?;
@@ -199,7 +199,7 @@ impl TestHarness {
         Ok(count)
     }
 
-    /// Run the cycledit binary with TZ=UTC, CURRENT_TIME_ZONED=<time>, and the given args.
+    /// Run the cycledit binary with `TZ=UTC`, `CURRENT_TIME_ZONED=<time>`, and the given args.
     pub fn run_cli(self, time: &str, args: &[&str]) -> eyre::Result<CommandOutput> {
         let binary = env!("CARGO_BIN_EXE_cycledit");
         let output: Output = Command::new(binary)

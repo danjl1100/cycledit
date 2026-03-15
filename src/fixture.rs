@@ -7,6 +7,10 @@ use gix::ObjectId;
 /// Introspect a git repository and emit a fixture string compatible with
 /// `TestHarness::init_git`. Commits are emitted oldest-first; merge commits
 /// (empty diff against first parent) are skipped.
+///
+/// # Errors
+/// Returns an error if reading the Git repository at `path` fails, or it contains
+/// invalid data
 pub fn dump_fixture_string(path: &Path) -> eyre::Result<String> {
     let repo = gix::discover(path).wrap_err("failed to discover git repository")?;
 
@@ -73,11 +77,13 @@ pub fn dump_fixture_string(path: &Path) -> eyre::Result<String> {
 
         diff_lines.sort_by_key(|(_, line)| *line);
 
-        output.push_str(&format!("\n{date}:\n"));
-        for (symbol, line) in &diff_lines {
-            output.push(*symbol);
-            output.push_str(line);
-            output.push('\n');
+        {
+            use std::fmt::Write as _;
+
+            write!(&mut output, "\n{date}:\n").expect("string fmt is infallible");
+            for (symbol, line) in &diff_lines {
+                writeln!(&mut output, "{symbol}{line}").expect("string fmt is infallible");
+            }
         }
     }
 

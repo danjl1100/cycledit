@@ -6,11 +6,15 @@ use crate::git::FileEntry;
 
 pub use self::params::ScheduleParams;
 
+/// Schedules the [`FileEntry`]s for the given [`ScheduleParams`]
+///
+/// # Errors
+/// Returns an error if the date arithmetic overflows
 pub fn compute_schedule(
     mut entries: Vec<FileEntry>,
     params: ScheduleParams,
     today: Date,
-) -> BTreeMap<Date, Vec<FileEntry>> {
+) -> Result<BTreeMap<Date, Vec<FileEntry>>, jiff::Error> {
     let cycle_days = params.get_cycle_days();
     let chunk_days = params.get_chunk_days();
 
@@ -27,22 +31,19 @@ pub fn compute_schedule(
     for entry in entries {
         let earliest = entry
             .get_date()
-            .checked_add(jiff::Span::new().days(cycle_days.get()))
-            .expect("date arithmetic overflow");
+            .checked_add(jiff::Span::new().days(cycle_days.get()))?;
         let mut chunk_date = earliest.max(today);
         loop {
-            let count = chunk_map.get(&chunk_date).map_or(0, |v| v.len());
+            let count = chunk_map.get(&chunk_date).map_or(0, Vec::len);
             if count < max_per_chunk {
                 break;
             }
-            chunk_date = chunk_date
-                .checked_add(jiff::Span::new().days(chunk_days.get()))
-                .expect("date arithmetic overflow");
+            chunk_date = chunk_date.checked_add(jiff::Span::new().days(chunk_days.get()))?;
         }
         chunk_map.entry(chunk_date).or_default().push(entry);
     }
 
-    chunk_map
+    Ok(chunk_map)
 }
 
 mod params {
@@ -52,20 +53,27 @@ mod params {
     use super::ChunkExceedsCycleError;
     use std::num::NonZeroU16;
 
+    /// Duration parameters for [`crate::schedule::compute_schedule`]
     #[derive(Clone, Copy, Debug)]
     pub struct ScheduleParams {
         cycle_days: NonZeroU16,
         chunk_days: NonZeroU16,
     }
     impl ScheduleParams {
+        /// Returns the number of days in the total cycle
+        #[must_use]
         pub fn get_cycle_days(self) -> NonZeroU16 {
             self.cycle_days
         }
+        /// Returns the number of days in each chunk (within the cycle)
+        #[must_use]
         pub fn get_chunk_days(self) -> NonZeroU16 {
             self.chunk_days
         }
     }
     impl super::ScheduleParamsBuilder<NonZeroU16> {
+        /// Sets the repeated chunk length in days
+        ///
         /// # Errors
         ///
         /// Returns an error if the `chunk_days` is greater than `cycle_days`
@@ -90,20 +98,26 @@ mod params {
 }
 
 impl ScheduleParams {
+    /// Returns a builder to construct a valid [`ScheduleParams`]
+    #[must_use]
     pub fn builder() -> ScheduleParamsBuilder {
         ScheduleParamsBuilder { cycle_days: () }
     }
 }
+/// Builder for [`ScheduleParams`]
 pub struct ScheduleParamsBuilder<T = ()> {
     cycle_days: T,
 }
 impl ScheduleParamsBuilder<()> {
+    /// Sets the total cycle length in days
+    #[must_use]
     pub fn cycle_days(self, cycle_days: NonZeroU16) -> ScheduleParamsBuilder<NonZeroU16> {
         let Self { cycle_days: () } = self;
         ScheduleParamsBuilder { cycle_days }
     }
 }
 
+/// Error for the `chunk_days` when creating [`ScheduleParams`]
 #[derive(Debug)]
 pub struct ChunkExceedsCycleError {
     cycle_days: NonZeroU16,
