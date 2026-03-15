@@ -1,3 +1,5 @@
+//! Integration tests.
+
 mod common;
 mod dump_fixture_tests;
 mod help_text_tests;

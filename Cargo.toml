@@ -13,3 +13,27 @@ eyre = { version = "0.6", default-features = false, features = ["auto-install"]}
 [dev-dependencies]
 insta = { version = "1", features = ["filters"] }
 tempfile = "3"
+
+# NOTE: The lint settings are the personal preferences of the project architect.
+#
+# `#[expect(...)]` annotations are permitted in the project, but require justification inline.
+[lints.clippy]
+# teach me
+pedantic = { level = "warn", priority = -1 }
+# except this confusing pattern
+bool_to_int_with_if = { level = "allow", priority = 1 }
+
+# no unwrap
+unwrap_used = "warn"
+# no panic
+panic = "warn"
+
+[lints.rust]
+# docs!
+missing_docs = "warn"
+# no unsafe
+unsafe_code = "forbid"
+
+[lints.rustdoc]
+# docs!
+broken_intra_doc_links = "warn"

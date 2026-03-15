@@ -2,7 +2,7 @@
 source: tests/integration/help_text_tests.rs
 expression: stdout
 ---
-Show only files due now (chunk_date <= today)
+Show only files due now (`chunk_date <= today`)
 
 Usage: cycledit now [OPTIONS] [PATHSPECS]...
 

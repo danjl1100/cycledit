@@ -7,7 +7,7 @@ Usage: cycledit <COMMAND>
 Commands:
   list      List files with their last-modified date
   schedule  Show the full edit schedule
-  now       Show only files due now (chunk_date <= today)
+  now       Show only files due now (`chunk_date <= today`)
   check     Check if any files are due; exits 100 if so
   help      Print this message or the help of the given subcommand(s)
 
