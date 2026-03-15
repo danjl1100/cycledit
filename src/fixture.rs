@@ -1,3 +1,5 @@
+//! Utilities for dumping Git repositories as test fixtures.
+
 use std::collections::HashMap;
 use std::path::Path;
 

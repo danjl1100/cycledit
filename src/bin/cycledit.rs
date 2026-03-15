@@ -1,3 +1,5 @@
+//! `cycledit` CLI binary.
+
 use clap::{Args, Parser, Subcommand};
 use cycledit::{git, schedule::ScheduleParams};
 use eyre::WrapErr;

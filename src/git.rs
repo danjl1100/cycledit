@@ -1,3 +1,5 @@
+//! Git repository introspection.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

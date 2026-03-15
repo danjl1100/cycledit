@@ -1,3 +1,5 @@
+//! Cycle schedule computation.
+
 use std::{collections::BTreeMap, num::NonZeroU16};
 
 use jiff::civil::Date;
