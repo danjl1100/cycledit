@@ -1,15 +1,19 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, num::NonZeroU16};
 
 use jiff::civil::Date;
 
 use crate::git::FileEntry;
 
+pub use self::params::ScheduleParams;
+
 pub fn compute_schedule(
     mut entries: Vec<FileEntry>,
-    cycle_days: i64,
-    chunk_days: i64,
+    params: ScheduleParams,
     today: Date,
 ) -> BTreeMap<Date, Vec<FileEntry>> {
+    let cycle_days = params.get_cycle_days();
+    let chunk_days = params.get_chunk_days();
+
     // Sort by (date ASC, blob_hash ASC) for deterministic scheduling.
     entries.sort_by(|a, b| {
         a.get_date()
@@ -17,13 +21,13 @@ pub fn compute_schedule(
             .then_with(|| a.get_blob_hash().cmp(b.get_blob_hash()))
     });
 
-    let max_per_chunk = ((chunk_days + cycle_days - 1) / cycle_days) as usize;
+    let max_per_chunk = usize::from(chunk_days.div_ceil(cycle_days).get());
     let mut chunk_map: BTreeMap<Date, Vec<FileEntry>> = BTreeMap::new();
 
     for entry in entries {
         let earliest = entry
             .get_date()
-            .checked_add(jiff::Span::new().days(cycle_days))
+            .checked_add(jiff::Span::new().days(cycle_days.get()))
             .expect("date arithmetic overflow");
         let mut chunk_date = earliest.max(today);
         loop {
@@ -32,11 +36,89 @@ pub fn compute_schedule(
                 break;
             }
             chunk_date = chunk_date
-                .checked_add(jiff::Span::new().days(chunk_days))
+                .checked_add(jiff::Span::new().days(chunk_days.get()))
                 .expect("date arithmetic overflow");
         }
         chunk_map.entry(chunk_date).or_default().push(entry);
     }
 
     chunk_map
+}
+
+mod params {
+    //! Invariants:
+    //! - `chunk_days` must be less than or equal to `cycle_days`
+
+    use super::ChunkExceedsCycleError;
+    use std::num::NonZeroU16;
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct ScheduleParams {
+        cycle_days: NonZeroU16,
+        chunk_days: NonZeroU16,
+    }
+    impl ScheduleParams {
+        pub fn get_cycle_days(self) -> NonZeroU16 {
+            self.cycle_days
+        }
+        pub fn get_chunk_days(self) -> NonZeroU16 {
+            self.chunk_days
+        }
+    }
+    impl super::ScheduleParamsBuilder<NonZeroU16> {
+        /// # Errors
+        ///
+        /// Returns an error if the `chunk_days` is greater than `cycle_days`
+        pub fn chunk_days(
+            self,
+            chunk_days: NonZeroU16,
+        ) -> Result<ScheduleParams, ChunkExceedsCycleError> {
+            let Self { cycle_days } = self;
+            if chunk_days > cycle_days {
+                Err(ChunkExceedsCycleError {
+                    cycle_days,
+                    chunk_days,
+                })
+            } else {
+                Ok(ScheduleParams {
+                    cycle_days,
+                    chunk_days,
+                })
+            }
+        }
+    }
+}
+
+impl ScheduleParams {
+    pub fn builder() -> ScheduleParamsBuilder {
+        ScheduleParamsBuilder { cycle_days: () }
+    }
+}
+pub struct ScheduleParamsBuilder<T = ()> {
+    cycle_days: T,
+}
+impl ScheduleParamsBuilder<()> {
+    pub fn cycle_days(self, cycle_days: NonZeroU16) -> ScheduleParamsBuilder<NonZeroU16> {
+        let Self { cycle_days: () } = self;
+        ScheduleParamsBuilder { cycle_days }
+    }
+}
+
+#[derive(Debug)]
+pub struct ChunkExceedsCycleError {
+    cycle_days: NonZeroU16,
+    chunk_days: NonZeroU16,
+}
+impl std::error::Error for ChunkExceedsCycleError {}
+impl std::fmt::Display for ChunkExceedsCycleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            cycle_days,
+            chunk_days,
+        } = self;
+        write!(
+            f,
+            "chunk days ({chunk_days}) exceeds cycle days ({cycle_days})"
+        )
+    }
 }

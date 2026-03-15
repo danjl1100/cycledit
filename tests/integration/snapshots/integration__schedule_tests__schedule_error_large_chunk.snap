@@ -1,0 +1,9 @@
+---
+source: tests/integration/schedule_tests.rs
+expression: output.stderr
+---
+Error: --chunk must one day or longer (e.g. period 1 day = "P1D" or "1d") and in range, got 'P19998Y'
+
+Caused by:
+   0: duration too large (overflow)
+   1: parameter 'year' is not in the required range of -9999..=9999

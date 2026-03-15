@@ -2,4 +2,7 @@
 source: tests/integration/schedule_tests.rs
 expression: output.stderr
 ---
-Error: --cycle must be a positive duration, got 'P0D'
+Error: --cycle must one day or longer (e.g. period 1 day = "P1D" or "1d") and in range, got 'P0D'
+
+Caused by:
+    zero duration: 0 days

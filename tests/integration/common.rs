@@ -22,6 +22,7 @@ pub struct TestHarness {
     dir: tempfile::TempDir,
 }
 
+#[derive(Debug)]
 pub struct CommandOutput {
     pub stdout: String,
     pub stderr: String,

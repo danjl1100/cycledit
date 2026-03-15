@@ -1,0 +1,8 @@
+---
+source: tests/integration/schedule_tests.rs
+expression: output.stderr
+---
+Error: invalid chunk duration "P7D"
+
+Caused by:
+    chunk days (7) exceeds cycle days (6)
