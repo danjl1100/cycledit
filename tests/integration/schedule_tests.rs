@@ -1,18 +1,72 @@
 use crate::common::TestHarness;
 
+const ARB_FIXTURE: &str = "
+2001-05-22:
++file1.txt
+";
+
 #[test]
 fn schedule_error_zero_cycle() -> eyre::Result<()> {
-    let output = TestHarness::new()?
-        .init_git(
-            "
-            2001-05-22:
-            +file1.txt
-            ",
-        )?
-        .run_cli(
-            "2026-01-01T00:00:00+00:00[UTC]",
-            &["schedule", "--cycle", "P0D"],
-        )?;
+    let output = TestHarness::new()?.init_git(ARB_FIXTURE)?.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["schedule", "--cycle", "P0D"],
+    )?;
+
+    assert_eq!(output.status.code(), Some(1));
+    insta::assert_snapshot!(output.stderr);
+    Ok(())
+}
+#[test]
+fn schedule_error_negative_cycle() -> eyre::Result<()> {
+    let output = TestHarness::new()?.init_git(ARB_FIXTURE)?.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["schedule", "--cycle=-P1D"],
+    )?;
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    insta::assert_snapshot!(output.stderr);
+    Ok(())
+}
+#[test]
+fn schedule_error_large_cycle() -> eyre::Result<()> {
+    let output = TestHarness::new()?.init_git(ARB_FIXTURE)?.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["schedule", "--cycle=P65536D"],
+    )?;
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    insta::assert_snapshot!(output.stderr);
+    Ok(())
+}
+
+#[test]
+fn schedule_error_zero_chunk() -> eyre::Result<()> {
+    let output = TestHarness::new()?.init_git(ARB_FIXTURE)?.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["schedule", "--chunk", "P0D"],
+    )?;
+
+    assert_eq!(output.status.code(), Some(1));
+    insta::assert_snapshot!(output.stderr);
+    Ok(())
+}
+#[test]
+fn schedule_error_large_chunk() -> eyre::Result<()> {
+    let output = TestHarness::new()?.init_git(ARB_FIXTURE)?.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["schedule", "--chunk", "P19998Y"],
+    )?;
+
+    assert_eq!(output.status.code(), Some(1));
+    insta::assert_snapshot!(output.stderr);
+    Ok(())
+}
+#[test]
+fn schedule_error_invalid_chunk() -> eyre::Result<()> {
+    let output = TestHarness::new()?.init_git(ARB_FIXTURE)?.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["schedule", "--chunk", "NOT-a-duration"],
+    )?;
 
     assert_eq!(output.status.code(), Some(1));
     insta::assert_snapshot!(output.stderr);
@@ -20,18 +74,11 @@ fn schedule_error_zero_cycle() -> eyre::Result<()> {
 }
 
 #[test]
-fn schedule_error_zero_chunk() -> eyre::Result<()> {
-    let output = TestHarness::new()?
-        .init_git(
-            "
-            2001-05-22:
-            +file1.txt
-            ",
-        )?
-        .run_cli(
-            "2026-01-01T00:00:00+00:00[UTC]",
-            &["schedule", "--chunk", "P0D"],
-        )?;
+fn schedule_error_chunk_exceeds_cycle() -> eyre::Result<()> {
+    let output = TestHarness::new()?.init_git(ARB_FIXTURE)?.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["schedule", "--chunk", "P7D", "--cycle", "P6D"],
+    )?;
 
     assert_eq!(output.status.code(), Some(1));
     insta::assert_snapshot!(output.stderr);
