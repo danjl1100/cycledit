@@ -20,6 +20,7 @@ enum GitOp<'a> {
 
 pub struct TestHarness {
     dir: tempfile::TempDir,
+    metrics: bool,
 }
 
 #[derive(Debug)]
@@ -33,7 +34,14 @@ impl TestHarness {
     pub fn new() -> eyre::Result<Self> {
         Ok(TestHarness {
             dir: tempfile::TempDir::new().wrap_err("failed to create tempdir")?,
+            metrics: false,
         })
+    }
+
+    /// Enable `CYCLEDIT_LOG_METRICS=1` for the next `run_cli` invocation.
+    pub fn with_metrics(mut self) -> Self {
+        self.metrics = true;
+        self
     }
 
     /// Parse a git state string and initialize the repo.
@@ -202,16 +210,18 @@ impl TestHarness {
     /// Run the cycledit binary with `TZ=UTC`, `CURRENT_TIME_ZONED=<time>`, and the given args.
     pub fn run_cli(self, time: &str, args: &[&str]) -> eyre::Result<CommandOutput> {
         let binary = env!("CARGO_BIN_EXE_cycledit");
-        let output: Output = Command::new(binary)
-            .args(args)
+        let mut cmd = Command::new(binary);
+        cmd.args(args)
             .current_dir(self.dir.path())
             .env_clear()
             .env("TZ", "UTC")
             .env("CURRENT_TIME_ZONED", time)
             .env("PATH", std::env::var("PATH").unwrap_or_default())
-            .env("HOME", std::env::var("HOME").unwrap_or_default())
-            .output()
-            .wrap_err("failed to run cycledit binary")?;
+            .env("HOME", std::env::var("HOME").unwrap_or_default());
+        if self.metrics {
+            cmd.env("CYCLEDIT_LOG_METRICS", "1");
+        }
+        let output: Output = cmd.output().wrap_err("failed to run cycledit binary")?;
 
         Ok(CommandOutput {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

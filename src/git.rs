@@ -3,6 +3,17 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static FIND_OBJECT_CALLS: AtomicU64 = AtomicU64::new(0);
+
+fn inc_find_object() {
+    FIND_OBJECT_CALLS.fetch_add(1, Ordering::Relaxed);
+}
+
+fn get_find_object_count() -> u64 {
+    FIND_OBJECT_CALLS.load(Ordering::Relaxed)
+}
 
 use eyre::WrapErr;
 use gix::ObjectId;
@@ -60,6 +71,7 @@ pub fn list_files(
         .wrap_err("rev-walk iteration failed")?;
 
     for info in &commits {
+        inc_find_object();
         let commit = repo
             .find_object(info.id)
             .wrap_err("find commit")?
@@ -91,6 +103,7 @@ pub fn list_files(
                 .wrap_err("parse parent id")?
         };
         let parent_blobs: HashMap<String, ObjectId> = if let Some(pid) = parent_id {
+            inc_find_object();
             let parent_commit = repo
                 .find_object(pid)
                 .wrap_err("find parent")?
@@ -129,6 +142,11 @@ pub fn list_files(
         .collect();
 
     entries.sort_by(|a, b| a.path.cmp(&b.path));
+
+    if std::env::var("CYCLEDIT_LOG_METRICS").as_deref() == Ok("1") {
+        eprintln!("metrics: find_object_calls={}", get_find_object_count());
+    }
+
     Ok(entries)
 }
 
@@ -179,6 +197,7 @@ pub(crate) fn walk_tree_blobs(
 ) -> eyre::Result<()> {
     let mut stack = vec![(String::new(), tree_id)];
     while let Some((prefix, tid)) = stack.pop() {
+        inc_find_object();
         let tree = repo
             .find_object(tid)
             .wrap_err("find tree obj")?

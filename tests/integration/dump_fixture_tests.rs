@@ -1,5 +1,37 @@
 use crate::common::TestHarness;
 
+/// Multi-commit fixture with subdirectories and deleted files, used for walk-metrics baseline.
+const METRICS_FIXTURE: &str = "
+2024-01-01:
++a/file1.txt
++a/file2.txt
++b/sub/file3.txt
++b/sub/file4.txt
++root1.txt
++root2.txt
+
+2024-02-01:
++a/file5.txt
+-a/file2.txt
++c/new1.txt
++c/new2.txt
+
+2024-03-01:
++a/file6.txt
+-b/sub/file3.txt
+-c/new1.txt
+";
+
+#[test]
+fn metrics_baseline() -> eyre::Result<()> {
+    let output = TestHarness::new()?
+        .init_git(METRICS_FIXTURE)?
+        .with_metrics()
+        .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"])?;
+    insta::assert_snapshot!(output.stderr);
+    Ok(())
+}
+
 #[test]
 fn round_trip_subdirectory() -> eyre::Result<()> {
     let fixture = "
