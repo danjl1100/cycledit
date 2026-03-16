@@ -6,6 +6,8 @@ use jiff::civil::Date;
 
 use crate::git::FileEntry;
 
+use eyre::{Context as _, OptionExt as _};
+
 pub use self::params::ScheduleParams;
 
 /// Schedules the [`FileEntry`]s for the given [`ScheduleParams`]
@@ -16,7 +18,7 @@ pub fn compute_schedule(
     mut entries: Vec<FileEntry>,
     params: ScheduleParams,
     today: Date,
-) -> Result<BTreeMap<Date, Vec<FileEntry>>, jiff::Error> {
+) -> eyre::Result<BTreeMap<Date, Vec<FileEntry>>> {
     let cycle_days = params.get_cycle_days();
     let chunk_days = params.get_chunk_days();
 
@@ -33,14 +35,34 @@ pub fn compute_schedule(
     for entry in entries {
         let earliest = entry
             .get_date()
-            .checked_add(jiff::Span::new().days(cycle_days.get()))?;
-        let mut chunk_date = earliest.max(today);
+            .checked_add(jiff::Span::new().days(cycle_days.get()))
+            .wrap_err("add overflow (earliest)")?;
+        // Snap earliest up to the nearest grid point at or after earliest.
+        // Grid: today + k * chunk_days for k = 0, 1, 2, …
+        // try_from fails (→ 0) for overdue files where days_ahead would be negative.
+        let days_ahead = u32::try_from(
+            earliest
+                .since(today)
+                .wrap_err("subtract overflow")?
+                .get_days(),
+        )
+        .unwrap_or(0);
+        let chunk = u32::from(chunk_days.get());
+
+        let mut k = days_ahead.div_ceil(chunk);
+        let mut chunk_date;
         loop {
+            let offset = k.checked_mul(chunk).ok_or_eyre("product overflow")?;
+            chunk_date = today
+                .checked_add(jiff::Span::new().days(offset))
+                .wrap_err("add overflow (chunk_date)")?;
+
             let count = chunk_map.get(&chunk_date).map_or(0, Vec::len);
             if count < max_per_chunk {
                 break;
             }
-            chunk_date = chunk_date.checked_add(jiff::Span::new().days(chunk_days.get()))?;
+
+            k = k.checked_add(1).ok_or_eyre("add overflow (counter)")?;
         }
         chunk_map.entry(chunk_date).or_default().push(entry);
     }

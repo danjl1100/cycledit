@@ -119,8 +119,9 @@ fn schedule_all_overdue_lands_in_today() -> eyre::Result<()> {
 #[test]
 fn schedule_future_dates() -> eyre::Result<()> {
     // file1 modified 2025-01-01, file2 modified 2025-07-01
-    // cycle=1yr → file1 due 2026-01-01, file2 due 2026-07-01
-    // today = 2025-06-01 (both in future)
+    // cycle=1yr → earliest 2026-01-01 and 2026-07-01; today = 2025-06-01, chunk=7d
+    // 2026-01-01 is 214d from today → k=ceil(214/7)=31 → grid slot 2026-01-04
+    // 2026-07-01 is 395d from today → k=ceil(395/7)=57 → grid slot 2026-07-05
     let output = TestHarness::new()?
         .init_git(
             "
@@ -136,9 +137,9 @@ fn schedule_future_dates() -> eyre::Result<()> {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"
-    2026-01-01:
+    2026-01-04:
     \tfile1.txt
-    2026-07-01:
+    2026-07-05:
     \tfile2.txt
     ");
     Ok(())
@@ -147,8 +148,8 @@ fn schedule_future_dates() -> eyre::Result<()> {
 /// Custom --cycle and --chunk args.
 #[test]
 fn schedule_custom_cycle_and_chunk() -> eyre::Result<()> {
-    // file1 modified 2024-01-01, cycle=P30D, chunk=P10D → due 2024-01-31
-    // today = 2023-06-01 (future)
+    // file1 modified 2024-01-01, cycle=P30D, chunk=P10D → earliest 2024-01-31
+    // today = 2023-06-01; days_ahead=244 → k=ceil(244/10)=25 → grid slot 2024-02-06
     let output = TestHarness::new()?
         .init_git(
             "
@@ -164,7 +165,7 @@ fn schedule_custom_cycle_and_chunk() -> eyre::Result<()> {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
     insta::assert_snapshot!(output.stdout, @"
-    2024-01-31:
+    2024-02-06:
     \tfile1.txt
     ");
     Ok(())
@@ -191,6 +192,80 @@ fn schedule_same_date_deterministic_order() -> eyre::Result<()> {
     \tzzz.txt
     2026-01-08:
     \taaa.txt
+    ");
+    Ok(())
+}
+
+/// Files whose earliest date falls between grid points are snapped to the next grid point,
+/// not placed directly at earliest.
+#[test]
+fn schedule_chunk_alignment() -> eyre::Result<()> {
+    // cycle=P7D, chunk=P7D → max_per_chunk = 1
+    // today = 2026-01-01
+    // file_a: committed 2025-12-25 → earliest = 2026-01-01 (= today) → grid slot 2026-01-01
+    // file_b: committed 2025-12-26 → earliest = 2026-01-02 → desired: snap to 2026-01-08
+    let output = TestHarness::new()?
+        .init_git(
+            "
+            2025-12-25:
+            +file_a.txt
+
+            2025-12-26:
+            +file_b.txt
+            ",
+        )?
+        .run_cli(
+            "2026-01-01T00:00:00+00:00[UTC]",
+            &["schedule", "--cycle", "P7D", "--chunk", "P7D"],
+        )?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
+    insta::assert_snapshot!(output.stdout, @"
+    2026-01-01:
+    \tfile_a.txt
+    2026-01-08:
+    \tfile_b.txt
+    ");
+    Ok(())
+}
+
+/// Variant with chunk shorter than cycle: files whose earliest falls between grid points
+/// are snapped to the next grid point.
+#[test]
+fn schedule_chunk_alignment_short_chunk() -> eyre::Result<()> {
+    // cycle=P7D, chunk=P3D → max_per_chunk = ceil(3/7) = 1
+    // grid: 2026-01-01, 2026-01-04, 2026-01-07, …
+    // file_a: committed 2025-12-22 → earliest 2025-12-29 (overdue) → slot 2026-01-01
+    // file_b: committed 2025-12-24 → earliest 2025-12-31 (overdue) → slot 2026-01-01 full → 2026-01-04
+    // file_c: committed 2025-12-26 → earliest 2026-01-02 → snap to 2026-01-04 full → 2026-01-07
+    let output = TestHarness::new()?
+        .init_git(
+            "
+            2025-12-22:
+            +file_a.txt
+
+            2025-12-24:
+            +file_b.txt
+
+            2025-12-26:
+            +file_c.txt
+            ",
+        )?
+        .run_cli(
+            "2026-01-01T00:00:00+00:00[UTC]",
+            &["schedule", "--cycle", "P7D", "--chunk", "P3D"],
+        )?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
+    insta::assert_snapshot!(output.stdout, @"
+    2026-01-01:
+    \tfile_a.txt
+    2026-01-04:
+    \tfile_b.txt
+    2026-01-07:
+    \tfile_c.txt
     ");
     Ok(())
 }
