@@ -77,12 +77,23 @@ Inside the walk loop:
   returns `Continue(true)`.  This avoids allocating a new path string for skipped trees.
 - Call `visitor.visit_blob(prefix, name, entry.object_id())` for each blob entry.
 
-### Existing caller
+### Existing callers
 
-`list_files` calls `walk_tree_blobs` twice per commit (once for the commit's tree,
-once for the parent's tree).  Wrap a concrete visitor struct that collects into a
-`HashMap<String, ObjectId>` to preserve the existing semantics while enabling future
-callers to be more selective.
+Two functions each call `walk_tree_blobs` twice per commit (once for the commit's tree,
+once for the parent's tree):
+
+- `list_files` in `src/git.rs`
+- `dump_fixture_string` in `src/fixture.rs`
+
+Wrap a concrete visitor struct that collects into a `HashMap<String, ObjectId>` to
+preserve the existing semantics for both callers while enabling future callers to be
+more selective.
+
+When issue 12 (`list_files` HEAD-only optimization) is implemented, `list_files` will
+gain a third call site — walking only the HEAD tree to build the initial candidate set
+before the commit walk begins.  The visitor API introduced here is what makes that
+call efficient (the caller can skip sub-trees or exit early instead of collecting
+everything into a `HashMap`).
 
 ## Test Coverage
 
@@ -94,4 +105,5 @@ callers to be more selective.
 ## Files Affected
 
 - `src/git.rs` — `walk_tree_blobs`, `list_files`
+- `src/fixture.rs` — `dump_fixture_string`
 - `tests/integration/dump_fixture_tests.rs` — new/adapted sub-tree test
