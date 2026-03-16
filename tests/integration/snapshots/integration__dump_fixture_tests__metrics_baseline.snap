@@ -2,4 +2,4 @@
 source: tests/integration/dump_fixture_tests.rs
 expression: output.stderr
 ---
-metrics: find_object_calls=28
+metrics: find_object_calls=25

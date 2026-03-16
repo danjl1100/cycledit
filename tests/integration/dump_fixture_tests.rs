@@ -1,25 +1,38 @@
 use crate::common::TestHarness;
 
-/// Multi-commit fixture with subdirectories and deleted files, used for walk-metrics baseline.
+/// Multi-commit fixture for walk-metrics baseline.
+///
+/// `trash/` is created across two early commits then entirely deleted, leaving only
+/// `keep/` files at HEAD.  The optimizations (HEAD-only candidate set, early exit,
+/// tree-pruning) skip the deleted subtree and short-circuit the walk, cutting
+/// `find_object` calls roughly in half compared to the unoptimized algorithm.
 const METRICS_FIXTURE: &str = "
 2024-01-01:
-+a/file1.txt
-+a/file2.txt
-+b/sub/file3.txt
-+b/sub/file4.txt
-+root1.txt
-+root2.txt
++trash/a.txt
++trash/b.txt
++trash/c.txt
++trash/d.txt
++trash/e.txt
 
 2024-02-01:
-+a/file5.txt
--a/file2.txt
-+c/new1.txt
-+c/new2.txt
++trash/f.txt
+-trash/a.txt
+-trash/b.txt
 
 2024-03-01:
-+a/file6.txt
--b/sub/file3.txt
--c/new1.txt
+-trash/c.txt
+-trash/d.txt
+-trash/e.txt
+-trash/f.txt
+
+2024-04-01:
++keep/file1.txt
++keep/file2.txt
++keep/file3.txt
+
+2024-05-01:
++keep/file4.txt
++keep/file5.txt
 ";
 
 #[test]
