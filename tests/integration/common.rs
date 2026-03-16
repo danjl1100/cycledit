@@ -231,12 +231,14 @@ fn run_git_env(dir: &std::path::Path, args: &[&str], env: &[(&str, &str)]) -> ey
     for (k, v) in env {
         cmd.env(k, v);
     }
-    let status = cmd
-        .status()
+    let output = cmd
+        .output()
         .wrap_err("failed to run git {args:?} in {dir:?}")?;
-    if status.success() {
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    if output.status.success() {
         Ok(())
     } else {
-        eyre::bail!("git {args:?} failed in {dir:?}: {status:?}")
+        eyre::bail!("git {args:?} failed in {dir:?}: {:?}", output.status)
     }
 }
