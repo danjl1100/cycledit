@@ -42,7 +42,11 @@ pub fn dump_fixture_string(path: &Path) -> eyre::Result<String> {
             .date();
 
         let tree_id = commit.tree().wrap_err("commit tree")?.id;
-        let current_blobs = crate::git::walk_tree_blobs(&repo, tree_id)?;
+        let current_blobs = {
+            let mut c = crate::git::HashMapCollector::new();
+            crate::git::walk_tree_blobs(&repo, tree_id, &mut c)?;
+            c.into_map()
+        };
 
         let parent_blobs: HashMap<String, ObjectId> = {
             let decoded = commit.decode().wrap_err("decode commit")?;
@@ -54,7 +58,9 @@ pub fn dump_fixture_string(path: &Path) -> eyre::Result<String> {
                     .try_into_commit()
                     .wrap_err("parent not a commit")?;
                 let parent_tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
-                crate::git::walk_tree_blobs(&repo, parent_tree_id)?
+                let mut c = crate::git::HashMapCollector::new();
+                crate::git::walk_tree_blobs(&repo, parent_tree_id, &mut c)?;
+                c.into_map()
             } else {
                 HashMap::new()
             }

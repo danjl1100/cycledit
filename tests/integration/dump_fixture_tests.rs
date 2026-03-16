@@ -1,6 +1,32 @@
 use crate::common::TestHarness;
 
 #[test]
+fn round_trip_subdirectory() -> eyre::Result<()> {
+    let fixture = "
+2024-06-01:
++README.md
++src/main.rs
++src/util/helper.rs
+";
+    let harness = TestHarness::new()?.init_git(fixture)?;
+    let dumped = harness.dump_fixture()?;
+    assert_eq!(dumped, fixture);
+
+    let list_output = TestHarness::new()?
+        .init_git(&dumped)?
+        .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"])?;
+    insta::assert_snapshot!(
+        list_output.stdout,
+        @r"
+    2024-06-01 README.md
+    2024-06-01 src/main.rs
+    2024-06-01 src/util/helper.rs
+    "
+    );
+    Ok(())
+}
+
+#[test]
 fn round_trip_single_add() -> eyre::Result<()> {
     let fixture = "
 2024-01-15:

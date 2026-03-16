@@ -1,6 +1,7 @@
 //! Git repository introspection.
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 
 use eyre::WrapErr;
@@ -72,7 +73,11 @@ pub fn list_files(
             .date();
 
         let tree_id = commit.tree().wrap_err("commit tree")?.id;
-        let current_blobs = walk_tree_blobs(&repo, tree_id)?;
+        let current_blobs = {
+            let mut c = HashMapCollector::new();
+            walk_tree_blobs(&repo, tree_id, &mut c)?;
+            c.into_map()
+        };
 
         // Get parent's blobs for comparison.
         // decoded.parents contains &BStr hex strings; parse to ObjectId first.
@@ -92,7 +97,9 @@ pub fn list_files(
                 .try_into_commit()
                 .wrap_err("parent not a commit")?;
             let parent_tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
-            walk_tree_blobs(&repo, parent_tree_id)?
+            let mut c = HashMapCollector::new();
+            walk_tree_blobs(&repo, parent_tree_id, &mut c)?;
+            c.into_map()
         } else {
             HashMap::new()
         };
@@ -125,12 +132,51 @@ pub fn list_files(
     Ok(entries)
 }
 
-/// Walk a git tree recursively and return a map of path → blob [`ObjectId`].
+/// Visitor called by [`walk_tree_blobs`] for each tree entry.
+pub(crate) trait TreeVisitor {
+    /// Called for each directory entry.  Return `Continue(true)` to descend,
+    /// `Continue(false)` to skip, or `Break(())` to abort the walk.
+    fn is_include_dir(&mut self, prefix: &str, name: &str) -> ControlFlow<(), bool>;
+
+    /// Called for each blob entry.  Return `Break(())` to abort the walk.
+    fn visit_blob(&mut self, prefix: &str, name: &str, object_id: ObjectId) -> ControlFlow<()>;
+}
+
+/// [`TreeVisitor`] that collects all blob entries into a [`HashMap`].
+pub(crate) struct HashMapCollector(HashMap<String, ObjectId>);
+
+impl HashMapCollector {
+    pub(crate) fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    pub(crate) fn into_map(self) -> HashMap<String, ObjectId> {
+        self.0
+    }
+}
+
+impl TreeVisitor for HashMapCollector {
+    fn is_include_dir(&mut self, _prefix: &str, _name: &str) -> ControlFlow<(), bool> {
+        ControlFlow::Continue(true)
+    }
+
+    fn visit_blob(&mut self, prefix: &str, name: &str, object_id: ObjectId) -> ControlFlow<()> {
+        let path = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        self.0.insert(path, object_id);
+        ControlFlow::Continue(())
+    }
+}
+
+/// Walk a git tree recursively, calling `visitor` for each entry.
 pub(crate) fn walk_tree_blobs(
     repo: &gix::Repository,
     tree_id: ObjectId,
-) -> eyre::Result<HashMap<String, ObjectId>> {
-    let mut blobs = HashMap::new();
+    visitor: &mut impl TreeVisitor,
+) -> eyre::Result<()> {
     let mut stack = vec![(String::new(), tree_id)];
     while let Some((prefix, tid)) = stack.pop() {
         let tree = repo
@@ -144,27 +190,37 @@ pub(crate) fn walk_tree_blobs(
             let name = entry
                 .filename()
                 .to_str()
-                .wrap_err("non-utf8 filename")?
-                .to_string();
-            let full_path = if prefix.is_empty() {
-                name
-            } else {
-                format!("{prefix}/{name}")
-            };
+                .wrap_err("non-utf8 filename")?;
 
             match entry.mode().kind() {
                 gix::object::tree::EntryKind::Tree => {
-                    stack.push((full_path, entry.object_id()));
+                    let ControlFlow::Continue(include) =
+                        visitor.is_include_dir(&prefix, name)
+                    else {
+                        return Ok(());
+                    };
+                    if include {
+                        let child_prefix = if prefix.is_empty() {
+                            name.to_string()
+                        } else {
+                            format!("{prefix}/{name}")
+                        };
+                        stack.push((child_prefix, entry.object_id()));
+                    }
                 }
                 gix::object::tree::EntryKind::Blob
                 | gix::object::tree::EntryKind::BlobExecutable => {
-                    blobs.insert(full_path, entry.object_id());
+                    let ControlFlow::Continue(()) =
+                        visitor.visit_blob(&prefix, name, entry.object_id())
+                    else {
+                        return Ok(());
+                    };
                 }
                 _ => {}
             }
         }
     }
-    Ok(blobs)
+    Ok(())
 }
 
 /// Simple glob matching against file path or filename.
