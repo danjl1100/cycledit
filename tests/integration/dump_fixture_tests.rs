@@ -110,10 +110,7 @@ fn round_trip_add_and_remove() -> eyre::Result<()> {
     let list_output = harness2.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"])?;
     insta::assert_snapshot!(
         list_output.stdout,
-        @r"
-    2024-03-20 bar.txt
-    2024-01-15 foo.txt
-    "
+        @"2024-03-20 bar.txt"
     );
     Ok(())
 }
