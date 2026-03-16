@@ -1,8 +1,19 @@
 //! Git repository introspection.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static FIND_OBJECT_CALLS: AtomicU64 = AtomicU64::new(0);
+
+fn inc_find_object() {
+    FIND_OBJECT_CALLS.fetch_add(1, Ordering::Relaxed);
+}
+
+fn get_find_object_count() -> u64 {
+    FIND_OBJECT_CALLS.load(Ordering::Relaxed)
+}
 
 use eyre::WrapErr;
 use gix::ObjectId;
@@ -39,6 +50,7 @@ impl FileEntry {
 ///
 /// # Errors
 /// Returns an error if reading the Git repository fails or it contains invalid data.
+#[allow(clippy::too_many_lines)]
 pub fn list_files(
     directory: &std::path::Path,
     pathspecs: &[String],
@@ -48,9 +60,6 @@ pub fn list_files(
 
     let head_id = repo.head_id().wrap_err("failed to resolve HEAD")?;
 
-    // Map from path -> (date, blob_hash) for most recent commit that CHANGED each file.
-    let mut file_dates: HashMap<String, (Date, ObjectId)> = HashMap::new();
-
     // Walk commits newest-first.
     let commits: Vec<_> = repo
         .rev_walk([head_id])
@@ -59,7 +68,93 @@ pub fn list_files(
         .collect::<Result<Vec<_>, _>>()
         .wrap_err("rev-walk iteration failed")?;
 
-    for info in &commits {
+    let mut commits_iter = commits.iter();
+
+    // Step 1: Process HEAD to build the candidate set.  We reuse the HEAD commit
+    // lookup that the loop would do anyway, so no extra find_object calls.
+    let Some(head_info) = commits_iter.next() else {
+        return Ok(vec![]);
+    };
+
+    inc_find_object();
+    let head_commit = repo
+        .find_object(head_info.id)
+        .wrap_err("find HEAD commit")?
+        .try_into_commit()
+        .wrap_err("HEAD is not a commit")?;
+
+    let head_date = {
+        let t = head_commit.time().wrap_err("HEAD commit time")?;
+        jiff::Timestamp::from_second(t.seconds as i64)
+            .wrap_err("timestamp")?
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .date()
+    };
+
+    let head_tree_id = head_commit.tree().wrap_err("HEAD tree")?.id;
+    let all_head_files: HashMap<String, ObjectId> = {
+        let mut c = HashMapCollector::new();
+        walk_tree_blobs(&repo, head_tree_id, &mut c)?;
+        c.into_map()
+    };
+
+    // Apply pathspec and exclude filters immediately (Step 1).
+    let head_filtered: HashMap<String, ObjectId> = all_head_files
+        .into_iter()
+        .filter(|(path, _)| {
+            let matches_include =
+                pathspecs.is_empty() || pathspecs.iter().any(|spec| matches_glob(spec, path));
+            let matches_exclude = excludes.iter().any(|spec| matches_glob(spec, path));
+            matches_include && !matches_exclude
+        })
+        .collect();
+
+    // Step 2: Track files that still need a date; exit early once all are dated.
+    let mut remaining: HashSet<String> = head_filtered.keys().cloned().collect();
+    let mut file_dates: HashMap<String, (Date, ObjectId)> = HashMap::new();
+
+    // Date HEAD's changes against its parent.
+    {
+        let head_parent_id: Option<ObjectId> = {
+            let decoded = head_commit.decode().wrap_err("decode HEAD commit")?;
+            decoded
+                .parents
+                .first()
+                .map(|hex| gix::ObjectId::from_hex(hex))
+                .transpose()
+                .wrap_err("parse HEAD parent id")?
+        };
+        let head_parent_subset: HashMap<String, ObjectId> = if let Some(pid) = head_parent_id {
+            inc_find_object();
+            let parent_commit = repo
+                .find_object(pid)
+                .wrap_err("find HEAD parent")?
+                .try_into_commit()
+                .wrap_err("HEAD parent not a commit")?;
+            let parent_tree_id = parent_commit.tree().wrap_err("HEAD parent tree")?.id;
+            // Step 3: filtered visitor prunes subtrees with no remaining files.
+            let mut v = RemainingFilteredCollector::new(&remaining);
+            walk_tree_blobs(&repo, parent_tree_id, &mut v)?;
+            v.into_map()
+        } else {
+            HashMap::new()
+        };
+
+        for (path, blob_hash) in &head_filtered {
+            if head_parent_subset.get(path) != Some(blob_hash) {
+                file_dates.insert(path.clone(), (head_date, *blob_hash));
+                remaining.remove(path);
+            }
+        }
+    }
+
+    // Walk older commits with the filtered visitor.
+    for info in commits_iter {
+        if remaining.is_empty() {
+            break;
+        }
+
+        inc_find_object();
         let commit = repo
             .find_object(info.id)
             .wrap_err("find commit")?
@@ -73,14 +168,13 @@ pub fn list_files(
             .date();
 
         let tree_id = commit.tree().wrap_err("commit tree")?.id;
-        let current_blobs = {
-            let mut c = HashMapCollector::new();
-            walk_tree_blobs(&repo, tree_id, &mut c)?;
-            c.into_map()
+        // Step 3: filtered visitor prunes subtrees with no remaining files.
+        let current_subset: HashMap<String, ObjectId> = {
+            let mut v = RemainingFilteredCollector::new(&remaining);
+            walk_tree_blobs(&repo, tree_id, &mut v)?;
+            v.into_map()
         };
 
-        // Get parent's blobs for comparison.
-        // decoded.parents contains &BStr hex strings; parse to ObjectId first.
         let parent_id: Option<ObjectId> = {
             let decoded = commit.decode().wrap_err("decode commit")?;
             decoded
@@ -90,37 +184,31 @@ pub fn list_files(
                 .transpose()
                 .wrap_err("parse parent id")?
         };
-        let parent_blobs: HashMap<String, ObjectId> = if let Some(pid) = parent_id {
+        let parent_subset: HashMap<String, ObjectId> = if let Some(pid) = parent_id {
+            inc_find_object();
             let parent_commit = repo
                 .find_object(pid)
                 .wrap_err("find parent")?
                 .try_into_commit()
                 .wrap_err("parent not a commit")?;
             let parent_tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
-            let mut c = HashMapCollector::new();
-            walk_tree_blobs(&repo, parent_tree_id, &mut c)?;
-            c.into_map()
+            let mut v = RemainingFilteredCollector::new(&remaining);
+            walk_tree_blobs(&repo, parent_tree_id, &mut v)?;
+            v.into_map()
         } else {
             HashMap::new()
         };
 
-        // Record files that changed in this commit (not yet seen in a newer commit).
-        for (path, blob_hash) in &current_blobs {
-            if !file_dates.contains_key(path) && parent_blobs.get(path) != Some(blob_hash) {
+        for (path, blob_hash) in &current_subset {
+            if parent_subset.get(path) != Some(blob_hash) {
                 file_dates.insert(path.clone(), (date, *blob_hash));
+                remaining.remove(path);
             }
         }
     }
 
-    // Apply pathspec and exclude filters, build result.
     let mut entries: Vec<FileEntry> = file_dates
         .into_iter()
-        .filter(|(path, _)| {
-            let matches_include =
-                pathspecs.is_empty() || pathspecs.iter().any(|spec| matches_glob(spec, path));
-            let matches_exclude = excludes.iter().any(|spec| matches_glob(spec, path));
-            matches_include && !matches_exclude
-        })
         .map(|(path, (date, blob_hash))| FileEntry {
             date,
             blob_hash,
@@ -129,6 +217,11 @@ pub fn list_files(
         .collect();
 
     entries.sort_by(|a, b| a.path.cmp(&b.path));
+
+    if std::env::var("CYCLEDIT_LOG_METRICS").as_deref() == Ok("1") {
+        eprintln!("metrics: find_object_calls={}", get_find_object_count());
+    }
+
     Ok(entries)
 }
 
@@ -171,6 +264,59 @@ impl TreeVisitor for HashMapCollector {
     }
 }
 
+/// [`TreeVisitor`] that collects only blob entries whose path is in `remaining`,
+/// pruning subtrees that contain no remaining files.
+struct RemainingFilteredCollector<'a> {
+    remaining: &'a HashSet<String>,
+    dir_prefixes: HashSet<String>,
+    result: HashMap<String, ObjectId>,
+}
+
+impl<'a> RemainingFilteredCollector<'a> {
+    fn new(remaining: &'a HashSet<String>) -> Self {
+        let mut dir_prefixes = HashSet::new();
+        for path in remaining {
+            // "a/b/c.txt" → insert "a", then "a/b"
+            let parts: Vec<&str> = path.split('/').collect();
+            for i in 1..parts.len() {
+                dir_prefixes.insert(parts[..i].join("/"));
+            }
+        }
+        Self {
+            remaining,
+            dir_prefixes,
+            result: HashMap::new(),
+        }
+    }
+
+    fn into_map(self) -> HashMap<String, ObjectId> {
+        self.result
+    }
+}
+
+impl TreeVisitor for RemainingFilteredCollector<'_> {
+    fn is_include_dir(&mut self, prefix: &str, name: &str) -> ControlFlow<(), bool> {
+        let full = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        ControlFlow::Continue(self.dir_prefixes.contains(&full))
+    }
+
+    fn visit_blob(&mut self, prefix: &str, name: &str, object_id: ObjectId) -> ControlFlow<()> {
+        let path = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        if self.remaining.contains(&path) {
+            self.result.insert(path, object_id);
+        }
+        ControlFlow::Continue(())
+    }
+}
+
 /// Walk a git tree recursively, calling `visitor` for each entry.
 pub(crate) fn walk_tree_blobs(
     repo: &gix::Repository,
@@ -179,6 +325,7 @@ pub(crate) fn walk_tree_blobs(
 ) -> eyre::Result<()> {
     let mut stack = vec![(String::new(), tree_id)];
     while let Some((prefix, tid)) = stack.pop() {
+        inc_find_object();
         let tree = repo
             .find_object(tid)
             .wrap_err("find tree obj")?

@@ -1,5 +1,50 @@
 use crate::common::TestHarness;
 
+/// Multi-commit fixture for walk-metrics baseline.
+///
+/// `trash/` is created across two early commits then entirely deleted, leaving only
+/// `keep/` files at HEAD.  The optimizations (HEAD-only candidate set, early exit,
+/// tree-pruning) skip the deleted subtree and short-circuit the walk, cutting
+/// `find_object` calls roughly in half compared to the unoptimized algorithm.
+const METRICS_FIXTURE: &str = "
+2024-01-01:
++trash/a.txt
++trash/b.txt
++trash/c.txt
++trash/d.txt
++trash/e.txt
+
+2024-02-01:
++trash/f.txt
+-trash/a.txt
+-trash/b.txt
+
+2024-03-01:
+-trash/c.txt
+-trash/d.txt
+-trash/e.txt
+-trash/f.txt
+
+2024-04-01:
++keep/file1.txt
++keep/file2.txt
++keep/file3.txt
+
+2024-05-01:
++keep/file4.txt
++keep/file5.txt
+";
+
+#[test]
+fn metrics_baseline() -> eyre::Result<()> {
+    let output = TestHarness::new()?
+        .init_git(METRICS_FIXTURE)?
+        .with_metrics()
+        .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"])?;
+    insta::assert_snapshot!(output.stderr);
+    Ok(())
+}
+
 #[test]
 fn round_trip_subdirectory() -> eyre::Result<()> {
     let fixture = "
@@ -65,10 +110,7 @@ fn round_trip_add_and_remove() -> eyre::Result<()> {
     let list_output = harness2.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"])?;
     insta::assert_snapshot!(
         list_output.stdout,
-        @r"
-    2024-03-20 bar.txt
-    2024-01-15 foo.txt
-    "
+        @"2024-03-20 bar.txt"
     );
     Ok(())
 }
