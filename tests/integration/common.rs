@@ -273,7 +273,7 @@ impl TestHarness {
     }
 
     /// Run the cycledit binary with `TZ=UTC`, `CURRENT_TIME_ZONED=<time>`, and the given args.
-    pub fn run_cli(self, time: &str, args: &[&str]) -> eyre::Result<CommandOutput> {
+    pub fn run_cli(&self, time: &str, args: &[&str]) -> eyre::Result<CommandOutput> {
         let binary = env!("CARGO_BIN_EXE_cycledit");
         let mut cmd = Command::new(binary);
         cmd.args(args)

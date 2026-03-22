@@ -315,13 +315,14 @@ fn metrics_high_depth() -> eyre::Result<()> {
         )],
     };
 
-    let output = TestHarness::new()?
+    let harness = TestHarness::new()?
         .init_git_from_blocks(&blocks)?
-        .with_metrics()
-        .run_cli(
-            "2026-01-01T00:00:00+00:00[UTC]",
-            &["list", "regular1.txt", "zzz/*"],
-        )?;
+        .with_metrics();
+
+    let output = harness.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["list", "regular1.txt", "zzz/*"],
+    )?;
     insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=55");
     insta::assert_snapshot!(output.stdout, @r"
     2025-06-24 regular1.txt
@@ -329,13 +330,10 @@ fn metrics_high_depth() -> eyre::Result<()> {
     ");
     let output_stdout_1 = output.stdout;
 
-    let output = TestHarness::new()?
-        .init_git_from_blocks(&blocks)?
-        .with_metrics()
-        .run_cli(
-            "2026-01-01T00:00:00+00:00[UTC]",
-            &["list", "--exclude", "folder_*", "--exclude", "other*"],
-        )?;
+    let output = harness.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["list", "--exclude", "folder_*", "--exclude", "other*"],
+    )?;
     insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=3");
     assert_eq!(output_stdout_1, output.stdout);
 
@@ -388,13 +386,14 @@ fn metrics_wide_breadth() -> eyre::Result<()> {
         ],
     };
 
-    let output = TestHarness::new()?
+    let harness = TestHarness::new()?
         .init_git_from_blocks(&blocks)?
-        .with_metrics()
-        .run_cli(
-            "2026-01-01T00:00:00+00:00[UTC]",
-            &["list", "regular1.txt", "zzz/*"],
-        )?;
+        .with_metrics();
+
+    let output = harness.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &["list", "regular1.txt", "zzz/*"],
+    )?;
     insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=122");
     insta::assert_snapshot!(output.stdout, @r"
     2025-01-02 mix_valid_24/plausible_tree/regular1.txt
@@ -402,21 +401,18 @@ fn metrics_wide_breadth() -> eyre::Result<()> {
     ");
     let output_stdout_1 = output.stdout;
 
-    let output = TestHarness::new()?
-        .init_git_from_blocks(&blocks)?
-        .with_metrics()
-        .run_cli(
-            "2026-01-01T00:00:00+00:00[UTC]",
-            &[
-                "list",
-                "--exclude",
-                "folder_*",
-                "--exclude",
-                "mixed_*",
-                "--exclude",
-                "distraction.txt",
-            ],
-        )?;
+    let output = harness.run_cli(
+        "2026-01-01T00:00:00+00:00[UTC]",
+        &[
+            "list",
+            "--exclude",
+            "folder_*",
+            "--exclude",
+            "mixed_*",
+            "--exclude",
+            "distraction.txt",
+        ],
+    )?;
     insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=8");
     assert_eq!(output_stdout_1, output.stdout);
 
