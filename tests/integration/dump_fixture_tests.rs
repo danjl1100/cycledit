@@ -314,6 +314,7 @@ fn metrics_high_depth() -> eyre::Result<()> {
             },
         )],
     };
+
     let output = TestHarness::new()?
         .init_git_from_blocks(&blocks)?
         .with_metrics()
@@ -326,6 +327,18 @@ fn metrics_high_depth() -> eyre::Result<()> {
     2025-06-24 regular1.txt
     2025-06-24 zzz/another_regular.txt
     ");
+    let output_stdout_1 = output.stdout;
+
+    let output = TestHarness::new()?
+        .init_git_from_blocks(&blocks)?
+        .with_metrics()
+        .run_cli(
+            "2026-01-01T00:00:00+00:00[UTC]",
+            &["list", "--exclude", "folder_*", "--exclude", "other*"],
+        )?;
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=3");
+    assert_eq!(output_stdout_1, output.stdout);
+
     Ok(())
 }
 
@@ -355,7 +368,10 @@ fn metrics_wide_breadth() -> eyre::Result<()> {
                 HighDepthTree {
                     trees: &large_forest_of_trees,
                     files_in_each_dir: &[(Op::Add, "f", 2)],
-                    regular_paths: &[(Op::Add, "distraction.txt")],
+                    regular_paths: &[
+                        (Op::Add, "distraction.txt"),
+                        (Op::Add, "another/distraction.txt"),
+                    ],
                 },
             ),
             (
@@ -364,13 +380,14 @@ fn metrics_wide_breadth() -> eyre::Result<()> {
                     trees: &[&*letters, &*numbers],
                     files_in_each_dir: &[(Op::Add, "f", 1)],
                     regular_paths: &[
-                        (Op::Add, "mixed_24/plausible_tree/regular1.txt"),
+                        (Op::Add, "mix_valid_24/plausible_tree/regular1.txt"),
                         (Op::Add, "zzz/another_regular.txt"),
                     ],
                 },
             ),
         ],
     };
+
     let output = TestHarness::new()?
         .init_git_from_blocks(&blocks)?
         .with_metrics()
@@ -378,10 +395,30 @@ fn metrics_wide_breadth() -> eyre::Result<()> {
             "2026-01-01T00:00:00+00:00[UTC]",
             &["list", "regular1.txt", "zzz/*"],
         )?;
-    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=121");
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=122");
     insta::assert_snapshot!(output.stdout, @r"
-    2025-01-02 mixed_24/plausible_tree/regular1.txt
+    2025-01-02 mix_valid_24/plausible_tree/regular1.txt
     2025-01-02 zzz/another_regular.txt
     ");
+    let output_stdout_1 = output.stdout;
+
+    let output = TestHarness::new()?
+        .init_git_from_blocks(&blocks)?
+        .with_metrics()
+        .run_cli(
+            "2026-01-01T00:00:00+00:00[UTC]",
+            &[
+                "list",
+                "--exclude",
+                "folder_*",
+                "--exclude",
+                "mixed_*",
+                "--exclude",
+                "distraction.txt",
+            ],
+        )?;
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=8");
+    assert_eq!(output_stdout_1, output.stdout);
+
     Ok(())
 }

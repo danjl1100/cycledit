@@ -86,22 +86,13 @@ pub fn list_files(
     };
 
     let head_tree_id = head_commit.tree().wrap_err("HEAD tree")?.id;
-    let all_head_files: HashMap<String, ObjectId> = {
-        let mut c = HashMapCollector::new();
-        walk_tree_blobs(&repo, head_tree_id, &mut c)?;
-        c.into_map()
-    };
 
     // Apply pathspec and exclude filters immediately (Step 1).
-    let head_filtered: HashMap<String, ObjectId> = all_head_files
-        .into_iter()
-        .filter(|(path, _)| {
-            let matches_include =
-                pathspecs.is_empty() || pathspecs.iter().any(|spec| matches_glob(spec, path));
-            let matches_exclude = excludes.iter().any(|spec| matches_glob(spec, path));
-            matches_include && !matches_exclude
-        })
-        .collect();
+    let head_filtered = {
+        let mut v = IncludeExcludeCollector::new(pathspecs, excludes);
+        walk_tree_blobs(&repo, head_tree_id, &mut v)?;
+        v.into_map()
+    };
 
     // Step 2: Track files that still need a date; exit early once all are dated.
     let mut remaining: HashSet<String> = head_filtered.keys().cloned().collect();
@@ -250,12 +241,92 @@ impl TreeVisitor for HashMapCollector {
     }
 
     fn visit_blob(&mut self, prefix: &str, name: &str, object_id: ObjectId) -> ControlFlow<()> {
-        let path = if prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{prefix}/{name}")
-        };
+        let path = format_prefix_and_name(prefix, name);
         self.0.insert(path, object_id);
+        ControlFlow::Continue(())
+    }
+}
+
+fn format_prefix_and_name(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{prefix}/{name}")
+    }
+}
+
+struct IncludeExcludeCollector<'a> {
+    pathspecs: &'a [String],
+    excludes: &'a [String],
+    result: HashMap<String, ObjectId>,
+}
+impl<'a> IncludeExcludeCollector<'a> {
+    fn new(pathspecs: &'a [String], excludes: &'a [String]) -> Self {
+        Self {
+            pathspecs,
+            excludes,
+            result: HashMap::new(),
+        }
+    }
+    fn into_map(self) -> HashMap<String, ObjectId> {
+        let Self {
+            pathspecs: _,
+            excludes: _,
+            result,
+        } = self;
+        result
+    }
+}
+impl TreeVisitor for IncludeExcludeCollector<'_> {
+    fn is_include_dir(&mut self, prefix: &str, name: &str) -> ControlFlow<(), bool> {
+        // NOTE: `pathspecs` can match individual files (arbitrarily deep in the tree), so
+        //       only consider "excludes" here
+        let Self {
+            pathspecs: _,
+            excludes,
+            result: _,
+        } = self;
+
+        if excludes.is_empty() {
+            return ControlFlow::Continue(true);
+        }
+
+        let path = format_prefix_and_name(prefix, name);
+        let matches_exclude = excludes
+            .iter()
+            .any(|spec| glob_match::glob_match(spec, &path));
+        ControlFlow::Continue(!matches_exclude)
+    }
+
+    fn visit_blob(&mut self, prefix: &str, name: &str, object_id: ObjectId) -> ControlFlow<()> {
+        let Self {
+            pathspecs,
+            excludes,
+            result,
+        } = self;
+
+        let name_matches_exclude = excludes
+            .iter()
+            .any(|spec| glob_match::glob_match(spec, name));
+
+        if !name_matches_exclude {
+            let path = format_prefix_and_name(prefix, name);
+
+            let matches_include = pathspecs.is_empty()
+                || pathspecs.iter().any(|spec| {
+                    let name_matches = glob_match::glob_match(spec, name);
+                    let path_matches = glob_match::glob_match(spec, &path);
+                    name_matches || path_matches
+                });
+            let matches_exclude = excludes
+                .iter()
+                .any(|spec| glob_match::glob_match(spec, &path));
+
+            if matches_include && !matches_exclude {
+                result.insert(path, object_id);
+            }
+        }
+
         ControlFlow::Continue(())
     }
 }
@@ -292,20 +363,14 @@ impl<'a> RemainingFilteredCollector<'a> {
 
 impl TreeVisitor for RemainingFilteredCollector<'_> {
     fn is_include_dir(&mut self, prefix: &str, name: &str) -> ControlFlow<(), bool> {
-        let full = if prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{prefix}/{name}")
-        };
-        ControlFlow::Continue(self.dir_prefixes.contains(&full))
+        let full = format_prefix_and_name(prefix, name);
+        let is_include_dir = self.dir_prefixes.contains(&full);
+        ControlFlow::Continue(is_include_dir)
     }
 
     fn visit_blob(&mut self, prefix: &str, name: &str, object_id: ObjectId) -> ControlFlow<()> {
-        let path = if prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{prefix}/{name}")
-        };
+        let path = format_prefix_and_name(prefix, name);
+        // TODO: want to **remove** from `remaining`, so we can break if it's empty
         if self.remaining.contains(&path) {
             self.result.insert(path, object_id);
         }
@@ -339,11 +404,7 @@ pub(crate) fn walk_tree_blobs(
                         return Ok(());
                     };
                     if include {
-                        let child_prefix = if prefix.is_empty() {
-                            name.to_string()
-                        } else {
-                            format!("{prefix}/{name}")
-                        };
+                        let child_prefix = format_prefix_and_name(&prefix, name);
                         stack.push((child_prefix, entry.object_id()));
                     }
                 }
@@ -362,54 +423,54 @@ pub(crate) fn walk_tree_blobs(
     Ok(())
 }
 
-/// Simple glob matching against file path or filename.
-fn matches_glob(pattern: &str, path: &str) -> bool {
-    glob_match::glob_match(pattern, path)
-        || PathBuf::from(path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|name| glob_match::glob_match(pattern, name))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn glob_question_mark_matches_single_char() {
-        assert!(matches_glob("file?.txt", "file1.txt"));
-    }
-
-    #[test]
-    fn glob_question_mark_does_not_cross_slash() {
-        assert!(!matches_glob("dir?.txt", "dir/a.txt"));
-    }
-
-    #[test]
-    fn glob_question_mark_does_not_match_empty() {
-        assert!(!matches_glob("file?.txt", "file.txt"));
-    }
-
-    #[test]
-    fn glob_character_class() {
-        assert!(matches_glob("file[0-9].txt", "file3.txt"));
-        assert!(!matches_glob("file[0-9].txt", "filea.txt"));
-    }
-
-    #[test]
-    fn glob_star_does_not_cross_slash() {
-        assert!(!matches_glob("src/*.rs", "src/foo/bar.rs"));
-    }
-
-    #[test]
-    fn glob_double_star_crosses_slash() {
-        assert!(matches_glob("src/**/*.rs", "src/foo/bar.rs"));
-        assert!(matches_glob("src/**/*.rs", "src/foo/baz/qux/bar.rs"));
-        assert!(!matches_glob("src/*/*.rs", "src/foo/baz/bar.rs"));
-    }
-
-    #[test]
-    fn glob_filename_fallback() {
-        assert!(matches_glob("*.rs", "src/main.rs"));
-    }
-}
+// /// Simple glob matching against file path or filename.
+// fn matches_glob(pattern: &str, path: String) -> bool {
+//     glob_match::glob_match(pattern, &path)
+//         || PathBuf::from(path)
+//             .file_name()
+//             .and_then(|n| n.to_str())
+//             .is_some_and(|name| glob_match::glob_match(pattern, name))
+// }
+//
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//
+//     #[test]
+//     fn glob_question_mark_matches_single_char() {
+//         assert!(matches_glob("file?.txt", "file1.txt".into()));
+//     }
+//
+//     #[test]
+//     fn glob_question_mark_does_not_cross_slash() {
+//         assert!(!matches_glob("dir?.txt", "dir/a.txt".into()));
+//     }
+//
+//     #[test]
+//     fn glob_question_mark_does_not_match_empty() {
+//         assert!(!matches_glob("file?.txt", "file.txt".into()));
+//     }
+//
+//     #[test]
+//     fn glob_character_class() {
+//         assert!(matches_glob("file[0-9].txt", "file3.txt".into()));
+//         assert!(!matches_glob("file[0-9].txt", "filea.txt".into()));
+//     }
+//
+//     #[test]
+//     fn glob_star_does_not_cross_slash() {
+//         assert!(!matches_glob("src/*.rs", "src/foo/bar.rs".into()));
+//     }
+//
+//     #[test]
+//     fn glob_double_star_crosses_slash() {
+//         assert!(matches_glob("src/**/*.rs", "src/foo/bar.rs".into()));
+//         assert!(matches_glob("src/**/*.rs", "src/foo/baz/qux/bar.rs".into()));
+//         assert!(!matches_glob("src/*/*.rs", "src/foo/baz/bar.rs".into()));
+//     }
+//
+//     #[test]
+//     fn glob_filename_fallback() {
+//         assert!(matches_glob("*.rs", "src/main.rs".into()));
+//     }
+// }
