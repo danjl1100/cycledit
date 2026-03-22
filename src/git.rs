@@ -61,20 +61,14 @@ pub fn list_files(
     let head_id = repo.head_id().wrap_err("failed to resolve HEAD")?;
 
     // Walk commits newest-first.
-    let commits: Vec<_> = repo
-        .rev_walk([head_id])
-        .all()
-        .wrap_err("rev-walk failed")?
-        .collect::<Result<Vec<_>, _>>()
-        .wrap_err("rev-walk iteration failed")?;
-
-    let mut commits_iter = commits.iter();
+    let mut commits_iter = repo.rev_walk([head_id]).all().wrap_err("rev-walk failed")?;
 
     // Step 1: Process HEAD to build the candidate set.  We reuse the HEAD commit
     // lookup that the loop would do anyway, so no extra find_object calls.
     let Some(head_info) = commits_iter.next() else {
         return Ok(vec![]);
     };
+    let head_info = head_info.wrap_err("rev-walk failed")?;
 
     inc_find_object();
     let head_commit = repo
@@ -153,6 +147,7 @@ pub fn list_files(
         if remaining.is_empty() {
             break;
         }
+        let info = info.wrap_err("rev-walk failed")?;
 
         inc_find_object();
         let commit = repo
@@ -218,7 +213,8 @@ pub fn list_files(
 
     entries.sort_by(|a, b| a.path.cmp(&b.path));
 
-    if std::env::var("CYCLEDIT_LOG_METRICS").as_deref() == Ok("1") {
+    let is_log_metrics = std::env::var("CYCLEDIT_LOG_METRICS").as_deref() == Ok("1");
+    if is_log_metrics {
         eprintln!("metrics: find_object_calls={}", get_find_object_count());
     }
 
@@ -334,15 +330,11 @@ pub(crate) fn walk_tree_blobs(
 
         for entry in tree.iter() {
             let entry = entry.wrap_err("tree entry")?;
-            let name = entry
-                .filename()
-                .to_str()
-                .wrap_err("non-utf8 filename")?;
+            let name = entry.filename().to_str().wrap_err("non-utf8 filename")?;
 
             match entry.mode().kind() {
                 gix::object::tree::EntryKind::Tree => {
-                    let ControlFlow::Continue(include) =
-                        visitor.is_include_dir(&prefix, name)
+                    let ControlFlow::Continue(include) = visitor.is_include_dir(&prefix, name)
                     else {
                         return Ok(());
                     };

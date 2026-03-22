@@ -1,4 +1,4 @@
-use crate::common::TestHarness;
+use crate::common::{BlockVisitor, BlocksIter, BlocksVisitor, GitOp, PathAndParent, TestHarness};
 
 /// Multi-commit fixture for walk-metrics baseline.
 ///
@@ -144,5 +144,244 @@ fn round_trip_multiple_files() -> eyre::Result<()> {
     2024-01-15 zzz.txt
     "
     );
+    Ok(())
+}
+
+struct DatedBlocks<'a> {
+    blocks: &'a [(&'a str, HighDepthTree<'a>)],
+}
+impl BlocksIter for &DatedBlocks<'_> {
+    fn visit_all<T: BlocksVisitor>(self, visitor: T) -> Result<(), T::Error> {
+        let DatedBlocks { blocks } = self;
+        let mut visitor = Some(visitor);
+        for block in *blocks {
+            let (
+                date,
+                HighDepthTree {
+                    trees,
+                    files_in_each_dir,
+                    regular_paths,
+                },
+            ) = *block;
+
+            let mut block_visitor = visitor
+                .take()
+                .expect("maintain visitor")
+                .start_block(date)?;
+
+            for tree in trees {
+                use std::fmt::Write as _;
+
+                const TREE_SEPARATOR: char = '/';
+                let full_tree = {
+                    let mut s = String::new();
+                    for p in *tree {
+                        write!(&mut s, "{p}{TREE_SEPARATOR}").expect("infallible");
+                    }
+                    s
+                };
+
+                let mut tree = &full_tree[..];
+                while let Some((next_tree, _last)) = tree.rsplit_once(TREE_SEPARATOR) {
+                    // write all the files in this dir
+                    for &(op, file, count) in files_in_each_dir {
+                        for i in 0..=count {
+                            let path = format!("{tree}/{file}{i}");
+                            let op = op.with_path(&path).expect("contains name");
+                            block_visitor.visit(op)?;
+                        }
+                    }
+                    // visit the parent
+                    tree = next_tree;
+                }
+            }
+            for &(op, regular_path) in regular_paths {
+                #[expect(clippy::panic)]
+                let Some(op) = op.with_path(regular_path) else {
+                    panic!("invalid regular_path, must have filename: {regular_path}")
+                };
+                block_visitor.visit(op)?;
+            }
+
+            visitor.replace(block_visitor.end()?);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Op {
+    Add,
+    Remove,
+}
+impl Op {
+    fn with_path(self, path: &str) -> Option<GitOp<'_>> {
+        match self {
+            Self::Add => PathAndParent::new(path).map(|path| GitOp::Add { parsed: path }),
+            Self::Remove => Some(GitOp::Remove { path }),
+        }
+    }
+}
+impl std::fmt::Display for Op {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op = match self {
+            Op::Add => '+',
+            Op::Remove => '-',
+        };
+        write!(f, "{op}")
+    }
+}
+#[derive(Clone, Copy, Debug)]
+struct HighDepthTree<'a> {
+    trees: &'a [&'a [&'a str]],
+    files_in_each_dir: &'a [(Op, &'a str, u32)],
+    regular_paths: &'a [(Op, &'a str)],
+}
+// TODO remove if unused (mostly a proof-of-concept for the visitor traits)
+impl std::fmt::Display for DatedBlocks<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct Visitor<'a, 'b>(&'a mut std::fmt::Formatter<'b>);
+        impl BlocksVisitor for Visitor<'_, '_> {
+            type Error = std::fmt::Error;
+            type BlockVisitor<'a>
+                = Self
+            where
+                Self: 'a;
+
+            fn start_block(mut self, date: &str) -> Result<Self, Self::Error> {
+                let Self(f) = &mut self;
+                writeln!(f, "{date}:")?;
+
+                Ok(self)
+            }
+        }
+        impl BlockVisitor<'_, Self> for Visitor<'_, '_> {
+            type Error = std::fmt::Error;
+            fn visit(&mut self, op: GitOp<'_>) -> Result<(), Self::Error> {
+                let Self(f) = self;
+                let (op, path) = match op {
+                    GitOp::Add { parsed } => {
+                        let path = parsed.get_path();
+                        ('+', path)
+                    }
+                    GitOp::Remove { path } => ('-', path),
+                };
+                writeln!(f, "{op}{path}")
+            }
+
+            fn end(mut self) -> Result<Self, Self::Error> {
+                let Self(f) = &mut self;
+                writeln!(f)?;
+
+                Ok(self)
+            }
+        }
+
+        self.visit_all(Visitor(f))
+    }
+}
+
+struct PrefixedList(Vec<String>);
+impl PrefixedList {
+    fn new(prefix: &str, iter: impl Iterator<Item: std::fmt::Display>) -> Self {
+        let list = iter.map(|elem| format!("{prefix}{elem}")).collect();
+        Self(list)
+    }
+    fn collect_refs(&self) -> Vec<&str> {
+        let Self(list) = self;
+        list.iter().map(|s| &**s).collect()
+    }
+}
+
+#[test]
+fn metrics_high_depth() -> eyre::Result<()> {
+    let numbers = PrefixedList::new("folder_", 0..50);
+    let numbers = numbers.collect_refs();
+    let blocks = DatedBlocks {
+        blocks: &[(
+            "2025-06-24",
+            HighDepthTree {
+                trees: &[
+                    //
+                    &*numbers,
+                    &["other", "tree"],
+                ],
+                files_in_each_dir: &[(Op::Add, "f", 1)],
+                regular_paths: &[
+                    (Op::Add, "regular1.txt"),
+                    (Op::Add, "zzz/another_regular.txt"),
+                ],
+            },
+        )],
+    };
+    let output = TestHarness::new()?
+        .init_git_from_blocks(&blocks)?
+        .with_metrics()
+        .run_cli(
+            "2026-01-01T00:00:00+00:00[UTC]",
+            &["list", "regular1.txt", "zzz/*"],
+        )?;
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=55");
+    insta::assert_snapshot!(output.stdout, @r"
+    2025-06-24 regular1.txt
+    2025-06-24 zzz/another_regular.txt
+    ");
+    Ok(())
+}
+
+#[test]
+fn metrics_wide_breadth() -> eyre::Result<()> {
+    let letters = PrefixedList::new("folder_", 'a'..='g');
+    let letters = letters.collect_refs();
+
+    let numbers = PrefixedList::new("folder_", 1..=5);
+    let numbers = numbers.collect_refs();
+
+    let mixed: Vec<_> = (0..40).map(|n| format!("mixed_{n}")).collect();
+
+    let large_forest_of_trees: Vec<_> = letters
+        .iter()
+        .copied()
+        .chain(numbers.iter().copied())
+        .chain(mixed.iter().map(|s| &**s))
+        .map(|first| [first, "tree"])
+        .collect();
+    let large_forest_of_trees: Vec<_> = large_forest_of_trees.iter().map(|s| &s[..]).collect();
+
+    let blocks = DatedBlocks {
+        blocks: &[
+            (
+                "2025-01-01",
+                HighDepthTree {
+                    trees: &large_forest_of_trees,
+                    files_in_each_dir: &[(Op::Add, "f", 2)],
+                    regular_paths: &[(Op::Add, "distraction.txt")],
+                },
+            ),
+            (
+                "2025-01-02",
+                HighDepthTree {
+                    trees: &[&*letters, &*numbers],
+                    files_in_each_dir: &[(Op::Add, "f", 1)],
+                    regular_paths: &[
+                        (Op::Add, "mixed_24/plausible_tree/regular1.txt"),
+                        (Op::Add, "zzz/another_regular.txt"),
+                    ],
+                },
+            ),
+        ],
+    };
+    let output = TestHarness::new()?
+        .init_git_from_blocks(&blocks)?
+        .with_metrics()
+        .run_cli(
+            "2026-01-01T00:00:00+00:00[UTC]",
+            &["list", "regular1.txt", "zzz/*"],
+        )?;
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=121");
+    insta::assert_snapshot!(output.stdout, @r"
+    2025-01-02 mixed_24/plausible_tree/regular1.txt
+    2025-01-02 zzz/another_regular.txt
+    ");
     Ok(())
 }
