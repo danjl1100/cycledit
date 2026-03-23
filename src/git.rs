@@ -136,7 +136,7 @@ pub fn list_files(
     let head_parent = walk_parent_blobs(&repo, head_parent_id, &remaining)?;
     apply_diff(
         &head_filtered,
-        &head_parent.blobs,
+        head_parent.as_ref().map(|p| &p.blobs),
         head_date,
         &mut file_dates,
         &mut remaining,
@@ -149,8 +149,7 @@ pub fn list_files(
     // Note: gix's built-in object cache would save disk I/O for repeated reads of the
     // same object, but walking the tree and building the HashMap would still be repeated;
     // the explicit cache here avoids that redundant work entirely.
-    let mut cached_tree: Option<(ObjectId, HashMap<String, ObjectId>)> =
-        head_parent.tree_id.map(|id| (id, head_parent.blobs));
+    let mut cached_tree: Option<ParentBlobsWalk> = head_parent;
 
     // Walk older commits with the filtered visitor.
     for info in commits_iter {
@@ -172,11 +171,12 @@ pub fn list_files(
         // Step 3: filtered visitor prunes subtrees with no remaining files.
         // Reuse the cached parent tree walk when the tree id matches (linear history).
         let current_subset = match cached_tree.take() {
-            Some((cached_id, mut cached_map)) if cached_id == tree_id => {
+            Some(cached) if cached.tree_id == tree_id => {
                 // The cached map may contain paths dated in the previous iteration;
                 // filter it down to only the still-undated files before comparing.
-                cached_map.retain(|path, _| remaining.contains(path.as_str()));
-                cached_map
+                let mut blobs = cached.blobs;
+                blobs.retain(|path, _| remaining.contains(path.as_str()));
+                blobs
             }
             _ => {
                 let mut v = RemainingFilteredCollector::new(&remaining);
@@ -197,14 +197,14 @@ pub fn list_files(
         let parent = walk_parent_blobs(&repo, parent_id, &remaining)?;
         apply_diff(
             &current_subset,
-            &parent.blobs,
+            parent.as_ref().map(|p| &p.blobs),
             date,
             &mut file_dates,
             &mut remaining,
         );
 
         // Cache this parent for the next iteration.
-        cached_tree = parent.tree_id.map(|id| (id, parent.blobs));
+        cached_tree = parent;
     }
 
     let entries: Vec<FileEntry> = file_dates
@@ -230,23 +230,21 @@ pub(crate) fn commit_date(seconds: i64) -> eyre::Result<Date> {
 }
 
 struct ParentBlobsWalk {
-    /// Tree `ObjectId` of the parent; `None` for root commits. Used as the cache key.
-    tree_id: Option<ObjectId>,
+    /// Tree `ObjectId` of the parent. Used as the cache key.
+    tree_id: ObjectId,
     /// Blob map of the parent's tree, filtered to `remaining` paths.
     blobs: HashMap<String, ObjectId>,
 }
 
 /// Walk `parent_id`'s tree and collect the blob map filtered to `remaining` paths.
+/// Returns `None` for root commits (no parent).
 fn walk_parent_blobs(
     repo: &gix::Repository,
     parent_id: Option<ObjectId>,
     remaining: &HashSet<String>,
-) -> eyre::Result<ParentBlobsWalk> {
+) -> eyre::Result<Option<ParentBlobsWalk>> {
     let Some(pid) = parent_id else {
-        return Ok(ParentBlobsWalk {
-            tree_id: None,
-            blobs: HashMap::new(),
-        });
+        return Ok(None);
     };
     METRICS.inc_find_object();
     let parent_commit = repo
@@ -257,23 +255,23 @@ fn walk_parent_blobs(
     let tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
     let mut v = RemainingFilteredCollector::new(remaining);
     walk_tree_blobs(repo, tree_id, &mut v)?;
-    Ok(ParentBlobsWalk {
-        tree_id: Some(tree_id),
+    Ok(Some(ParentBlobsWalk {
+        tree_id,
         blobs: v.into_map(),
-    })
+    }))
 }
 
 /// For each path in `current` whose blob differs from `parent`, record `date` in
 /// `file_dates` and remove the path from `remaining`.
 fn apply_diff(
     current: &HashMap<String, ObjectId>,
-    parent: &HashMap<String, ObjectId>,
+    parent: Option<&HashMap<String, ObjectId>>,
     date: Date,
     file_dates: &mut BTreeMap<String, (Date, ObjectId)>,
     remaining: &mut HashSet<String>,
 ) {
     for (path, blob_hash) in current {
-        if parent.get(path) != Some(blob_hash) {
+        if parent.and_then(|p| p.get(path)) != Some(blob_hash) {
             file_dates.insert(path.clone(), (date, *blob_hash));
             remaining.remove(path);
         }
