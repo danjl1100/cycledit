@@ -1,21 +1,19 @@
 use eyre::Context as _;
-use std::process::{Command, Output};
+use std::{
+    io::BufRead,
+    process::{Command, Output},
+};
 
 use self::git_ops_blocks::GitOpsBlocks;
+pub use self::path_and_parent::PathAndParent;
 
 mod git_ops_blocks;
+mod path_and_parent;
 
 #[derive(Clone, Copy, Debug)]
-enum GitOp<'a> {
-    Add {
-        // `{parent_path}/{name}` or if `parent_path` is empty, just `name`
-        path: &'a str,
-        parent_path: &'a str,
-        name: &'a str,
-    },
-    Remove {
-        path: &'a str,
-    },
+pub enum GitOp<'a> {
+    Add { parsed: PathAndParent<'a> },
+    Remove { path: &'a str },
 }
 
 pub struct TestHarness {
@@ -61,8 +59,26 @@ impl TestHarness {
         let blocks = GitOpsBlocks::from_str(state).wrap_err_with(|| {
             format!("invalid input for init_git:\n--------\n{state}\n---END---")
         })?;
+        self.init_git_from_blocks(&blocks)
+    }
+    pub fn init_git_from_blocks(self, blocks: impl BlocksIter) -> eyre::Result<Self> {
+        const DEBUG_ON_ERROR: bool = false;
+
+        let path = self.dir.path();
+
         // perform I/O
-        self.init_git_io(&blocks).wrap_err("init_git I/O failed")
+        let result = Self::init_git_io(blocks, path).wrap_err("init_git I/O failed");
+
+        if let Err(e) = &result
+            && DEBUG_ON_ERROR
+        {
+            // for debugging tests, keep the tempdir around until stdin receives a line
+            eprintln!("{}\n{e:?}", path.display());
+            let _ = std::io::stdin().lock().read_line(&mut String::new());
+            eprintln!("exit");
+        }
+
+        result.map(|()| self)
     }
 }
 impl<'a> GitOpsBlocks<'a> {
@@ -104,17 +120,10 @@ impl<'a> GitOpsBlocks<'a> {
             return Ok(());
         }
         let op = if let Some(path) = line.strip_prefix('+') {
-            let (parent_path, name) = path.rsplit_once('/').unwrap_or(("", path));
-            if name.is_empty() {
-                eyre::bail!(
-                    "empty filename: {path:?} -> parent_path {parent_path:?}, name {name:?}"
-                );
-            }
-            GitOp::Add {
-                path,
-                parent_path,
-                name,
-            }
+            let Some(parsed) = PathAndParent::new(path) else {
+                eyre::bail!("empty filename: {path:?}");
+            };
+            GitOp::Add { parsed }
         } else if let Some(path) = line.strip_prefix('-') {
             GitOp::Remove { path }
         } else {
@@ -133,22 +142,76 @@ impl<'a> GitOpsBlocks<'a> {
         }
     }
 }
+
+pub trait BlocksVisitor: Sized {
+    type Error;
+    type BlockVisitor<'a>: BlockVisitor<'a, Self, Error = Self::Error>
+    where
+        Self: 'a;
+    /// Start a new block
+    fn start_block(self, date: &str) -> Result<Self::BlockVisitor<'_>, Self::Error>;
+}
+pub trait BlockVisitor<'a, T> {
+    type Error;
+    /// Visit an operation in the current block
+    fn visit(&mut self, op: GitOp<'_>) -> Result<(), Self::Error>;
+    /// Ends the block and returns the original [`BlocksVisitor`]
+    fn end(self) -> Result<T, Self::Error>;
+}
+
+pub trait BlocksIter {
+    fn visit_all<T: BlocksVisitor>(self, visitor: T) -> Result<(), T::Error>;
+}
+impl BlocksIter for &GitOpsBlocks<'_> {
+    fn visit_all<T: BlocksVisitor>(self, visitor: T) -> Result<(), T::Error> {
+        let mut visitor = Some(visitor);
+        for (date, ops) in GitOpsBlocks::iter(self) {
+            let mut block = visitor
+                .take()
+                .expect("maintain visitor")
+                .start_block(date)?;
+            for &op in ops {
+                block.visit(op)?;
+            }
+            visitor.replace(block.end()?);
+        }
+        Ok(())
+    }
+}
+
 impl TestHarness {
-    fn init_git_io(self, blocks: &GitOpsBlocks<'_>) -> eyre::Result<Self> {
-        let dir = self.dir.path();
+    fn init_git_io(blocks: impl BlocksIter, dir: &std::path::Path) -> eyre::Result<()> {
+        struct Visitor<'a> {
+            dir: &'a std::path::Path,
+        }
+        struct VisitorInner<'a, 'b> {
+            outer: Visitor<'a>,
+            date: &'b str,
+        }
+        impl<'a> BlocksVisitor for Visitor<'a> {
+            type Error = eyre::Report;
+            type BlockVisitor<'b>
+                = VisitorInner<'a, 'b>
+            where
+                Self: 'b;
 
-        run_git(dir, &["init", "-b", "main"])?;
-        run_git(dir, &["config", "user.email", "test@example.com"])?;
-        run_git(dir, &["config", "user.name", "Test"])?;
+            fn start_block<'b>(self, date: &'b str) -> Result<VisitorInner<'a, 'b>, Self::Error> {
+                Ok(VisitorInner { outer: self, date })
+            }
+        }
+        impl<'a, 'b> BlockVisitor<'b, Visitor<'a>> for VisitorInner<'a, 'b> {
+            type Error = eyre::Report;
 
-        for (date, ops) in blocks.iter() {
-            for op in ops {
+            fn visit(&mut self, op: GitOp<'_>) -> Result<(), Self::Error> {
+                let Self {
+                    outer: Visitor { dir },
+                    date,
+                } = self;
                 match op {
-                    GitOp::Add {
-                        path,
-                        parent_path,
-                        name,
-                    } => {
+                    GitOp::Add { parsed } => {
+                        let parent_path = parsed.get_parent_path();
+                        let name = parsed.get_name();
+
                         let parent_path_abs = dir.join(parent_path);
                         std::fs::create_dir_all(&parent_path_abs).wrap_err_with(|| {
                             format!(
@@ -157,6 +220,7 @@ impl TestHarness {
                             )
                         })?;
 
+                        let path = parsed.get_path();
                         // Write unique content so each file gets a unique blob hash
                         let contents = format!("{date}:{path}");
 
@@ -171,19 +235,36 @@ impl TestHarness {
                         run_git(dir, &["rm", "--force", path])?;
                     }
                 }
+                Ok(())
             }
-            let datetime = format!("{date}T12:00:00+00:00");
-            run_git_env(
-                dir,
-                &["commit", "-m", &format!("commit on {date}")],
-                &[
-                    ("GIT_COMMITTER_DATE", datetime.as_str()),
-                    ("GIT_AUTHOR_DATE", datetime.as_str()),
-                ],
-            )?;
+
+            fn end(self) -> Result<Visitor<'a>, Self::Error> {
+                let Self {
+                    outer: Visitor { dir },
+                    date,
+                } = self;
+
+                let datetime = format!("{date}T12:00:00+00:00");
+                run_git_env(
+                    dir,
+                    &["commit", "-m", &format!("commit on {date}")],
+                    &[
+                        ("GIT_COMMITTER_DATE", datetime.as_str()),
+                        ("GIT_AUTHOR_DATE", datetime.as_str()),
+                    ],
+                )?;
+
+                Ok(self.outer)
+            }
         }
 
-        Ok(self)
+        run_git(dir, &["init", "-b", "main"])?;
+        run_git(dir, &["config", "user.email", "test@example.com"])?;
+        run_git(dir, &["config", "user.name", "Test"])?;
+
+        blocks.visit_all(Visitor { dir })?;
+
+        Ok(())
     }
 
     pub fn dump_fixture(&self) -> eyre::Result<String> {
@@ -208,7 +289,7 @@ impl TestHarness {
     }
 
     /// Run the cycledit binary with `TZ=UTC`, `CURRENT_TIME_ZONED=<time>`, and the given args.
-    pub fn run_cli(self, time: &str, args: &[&str]) -> eyre::Result<CommandOutput> {
+    pub fn run_cli(&self, time: &str, args: &[&str]) -> eyre::Result<CommandOutput> {
         let binary = env!("CARGO_BIN_EXE_cycledit");
         let mut cmd = Command::new(binary);
         cmd.args(args)

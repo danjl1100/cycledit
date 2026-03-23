@@ -5,14 +5,46 @@ use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-static FIND_OBJECT_CALLS: AtomicU64 = AtomicU64::new(0);
+static METRICS: Metrics = Metrics::new();
 
-fn inc_find_object() {
-    FIND_OBJECT_CALLS.fetch_add(1, Ordering::Relaxed);
+struct Metrics {
+    find_object_calls: AtomicU64,
+    visited_files: AtomicU64,
+    visited_dirs: AtomicU64,
 }
-
-fn get_find_object_count() -> u64 {
-    FIND_OBJECT_CALLS.load(Ordering::Relaxed)
+impl Metrics {
+    const fn new() -> Self {
+        Self {
+            find_object_calls: AtomicU64::new(0),
+            visited_files: AtomicU64::new(0),
+            visited_dirs: AtomicU64::new(0),
+        }
+    }
+    fn inc_find_object(&self) {
+        self.find_object_calls.fetch_add(1, Ordering::Relaxed);
+    }
+    fn inc_visit_file(&self) {
+        self.visited_files.fetch_add(1, Ordering::Relaxed);
+    }
+    fn inc_visit_dir(&self) {
+        self.visited_dirs.fetch_add(1, Ordering::Relaxed);
+    }
+}
+impl std::fmt::Display for Metrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            find_object_calls,
+            visited_files,
+            visited_dirs,
+        } = self;
+        let find_object_calls = find_object_calls.load(Ordering::Relaxed);
+        let visited_dirs = visited_dirs.load(Ordering::Relaxed);
+        let visited_files = visited_files.load(Ordering::Relaxed);
+        write!(
+            f,
+            "metrics: find_object_calls={find_object_calls}, visited_dirs={visited_dirs}, visited_files={visited_files}"
+        )
+    }
 }
 
 use eyre::WrapErr;
@@ -61,22 +93,16 @@ pub fn list_files(
     let head_id = repo.head_id().wrap_err("failed to resolve HEAD")?;
 
     // Walk commits newest-first.
-    let commits: Vec<_> = repo
-        .rev_walk([head_id])
-        .all()
-        .wrap_err("rev-walk failed")?
-        .collect::<Result<Vec<_>, _>>()
-        .wrap_err("rev-walk iteration failed")?;
-
-    let mut commits_iter = commits.iter();
+    let mut commits_iter = repo.rev_walk([head_id]).all().wrap_err("rev-walk failed")?;
 
     // Step 1: Process HEAD to build the candidate set.  We reuse the HEAD commit
     // lookup that the loop would do anyway, so no extra find_object calls.
     let Some(head_info) = commits_iter.next() else {
         return Ok(vec![]);
     };
+    let head_info = head_info.wrap_err("rev-walk failed")?;
 
-    inc_find_object();
+    METRICS.inc_find_object();
     let head_commit = repo
         .find_object(head_info.id)
         .wrap_err("find HEAD commit")?
@@ -92,22 +118,13 @@ pub fn list_files(
     };
 
     let head_tree_id = head_commit.tree().wrap_err("HEAD tree")?.id;
-    let all_head_files: HashMap<String, ObjectId> = {
-        let mut c = HashMapCollector::new();
-        walk_tree_blobs(&repo, head_tree_id, &mut c)?;
-        c.into_map()
-    };
 
     // Apply pathspec and exclude filters immediately (Step 1).
-    let head_filtered: HashMap<String, ObjectId> = all_head_files
-        .into_iter()
-        .filter(|(path, _)| {
-            let matches_include =
-                pathspecs.is_empty() || pathspecs.iter().any(|spec| matches_glob(spec, path));
-            let matches_exclude = excludes.iter().any(|spec| matches_glob(spec, path));
-            matches_include && !matches_exclude
-        })
-        .collect();
+    let head_filtered = {
+        let mut v = IncludeExcludeCollector::new(pathspecs, excludes);
+        walk_tree_blobs(&repo, head_tree_id, &mut v)?;
+        v.into_map()
+    };
 
     // Step 2: Track files that still need a date; exit early once all are dated.
     let mut remaining: HashSet<String> = head_filtered.keys().cloned().collect();
@@ -125,7 +142,7 @@ pub fn list_files(
                 .wrap_err("parse HEAD parent id")?
         };
         let head_parent_subset: HashMap<String, ObjectId> = if let Some(pid) = head_parent_id {
-            inc_find_object();
+            METRICS.inc_find_object();
             let parent_commit = repo
                 .find_object(pid)
                 .wrap_err("find HEAD parent")?
@@ -153,8 +170,9 @@ pub fn list_files(
         if remaining.is_empty() {
             break;
         }
+        let info = info.wrap_err("rev-walk failed")?;
 
-        inc_find_object();
+        METRICS.inc_find_object();
         let commit = repo
             .find_object(info.id)
             .wrap_err("find commit")?
@@ -185,7 +203,7 @@ pub fn list_files(
                 .wrap_err("parse parent id")?
         };
         let parent_subset: HashMap<String, ObjectId> = if let Some(pid) = parent_id {
-            inc_find_object();
+            METRICS.inc_find_object();
             let parent_commit = repo
                 .find_object(pid)
                 .wrap_err("find parent")?
@@ -218,8 +236,9 @@ pub fn list_files(
 
     entries.sort_by(|a, b| a.path.cmp(&b.path));
 
-    if std::env::var("CYCLEDIT_LOG_METRICS").as_deref() == Ok("1") {
-        eprintln!("metrics: find_object_calls={}", get_find_object_count());
+    let is_log_metrics = std::env::var("CYCLEDIT_LOG_METRICS").as_deref() == Ok("1");
+    if is_log_metrics {
+        eprintln!("{METRICS}");
     }
 
     Ok(entries)
@@ -254,12 +273,92 @@ impl TreeVisitor for HashMapCollector {
     }
 
     fn visit_blob(&mut self, prefix: &str, name: &str, object_id: ObjectId) -> ControlFlow<()> {
-        let path = if prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{prefix}/{name}")
-        };
+        let path = format_prefix_and_name(prefix, name);
         self.0.insert(path, object_id);
+        ControlFlow::Continue(())
+    }
+}
+
+fn format_prefix_and_name(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{prefix}/{name}")
+    }
+}
+
+struct IncludeExcludeCollector<'a> {
+    pathspecs: &'a [String],
+    excludes: &'a [String],
+    result: HashMap<String, ObjectId>,
+}
+impl<'a> IncludeExcludeCollector<'a> {
+    fn new(pathspecs: &'a [String], excludes: &'a [String]) -> Self {
+        Self {
+            pathspecs,
+            excludes,
+            result: HashMap::new(),
+        }
+    }
+    fn into_map(self) -> HashMap<String, ObjectId> {
+        let Self {
+            pathspecs: _,
+            excludes: _,
+            result,
+        } = self;
+        result
+    }
+}
+impl TreeVisitor for IncludeExcludeCollector<'_> {
+    fn is_include_dir(&mut self, prefix: &str, name: &str) -> ControlFlow<(), bool> {
+        // NOTE: `pathspecs` can match individual files (arbitrarily deep in the tree), so
+        //       only consider "excludes" here
+        let Self {
+            pathspecs: _,
+            excludes,
+            result: _,
+        } = self;
+
+        if excludes.is_empty() {
+            return ControlFlow::Continue(true);
+        }
+
+        let path = format_prefix_and_name(prefix, name);
+        let matches_exclude = excludes
+            .iter()
+            .any(|spec| glob_match::glob_match(spec, &path));
+        ControlFlow::Continue(!matches_exclude)
+    }
+
+    fn visit_blob(&mut self, prefix: &str, name: &str, object_id: ObjectId) -> ControlFlow<()> {
+        let Self {
+            pathspecs,
+            excludes,
+            result,
+        } = self;
+
+        let name_matches_exclude = excludes
+            .iter()
+            .any(|spec| glob_match::glob_match(spec, name));
+
+        if !name_matches_exclude {
+            let path = format_prefix_and_name(prefix, name);
+
+            let matches_include = pathspecs.is_empty()
+                || pathspecs.iter().any(|spec| {
+                    let name_matches = glob_match::glob_match(spec, name);
+                    let path_matches = glob_match::glob_match(spec, &path);
+                    name_matches || path_matches
+                });
+            let matches_exclude = excludes
+                .iter()
+                .any(|spec| glob_match::glob_match(spec, &path));
+
+            if matches_include && !matches_exclude {
+                result.insert(path, object_id);
+            }
+        }
+
         ControlFlow::Continue(())
     }
 }
@@ -296,20 +395,14 @@ impl<'a> RemainingFilteredCollector<'a> {
 
 impl TreeVisitor for RemainingFilteredCollector<'_> {
     fn is_include_dir(&mut self, prefix: &str, name: &str) -> ControlFlow<(), bool> {
-        let full = if prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{prefix}/{name}")
-        };
-        ControlFlow::Continue(self.dir_prefixes.contains(&full))
+        let full = format_prefix_and_name(prefix, name);
+        let is_include_dir = self.dir_prefixes.contains(&full);
+        ControlFlow::Continue(is_include_dir)
     }
 
     fn visit_blob(&mut self, prefix: &str, name: &str, object_id: ObjectId) -> ControlFlow<()> {
-        let path = if prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{prefix}/{name}")
-        };
+        let path = format_prefix_and_name(prefix, name);
+        // TODO: want to **remove** from `remaining`, so we can break if it's empty
         if self.remaining.contains(&path) {
             self.result.insert(path, object_id);
         }
@@ -325,7 +418,7 @@ pub(crate) fn walk_tree_blobs(
 ) -> eyre::Result<()> {
     let mut stack = vec![(String::new(), tree_id)];
     while let Some((prefix, tid)) = stack.pop() {
-        inc_find_object();
+        METRICS.inc_find_object();
         let tree = repo
             .find_object(tid)
             .wrap_err("find tree obj")?
@@ -334,29 +427,25 @@ pub(crate) fn walk_tree_blobs(
 
         for entry in tree.iter() {
             let entry = entry.wrap_err("tree entry")?;
-            let name = entry
-                .filename()
-                .to_str()
-                .wrap_err("non-utf8 filename")?;
+            let name = entry.filename().to_str().wrap_err("non-utf8 filename")?;
 
             match entry.mode().kind() {
                 gix::object::tree::EntryKind::Tree => {
-                    let ControlFlow::Continue(include) =
-                        visitor.is_include_dir(&prefix, name)
+                    let ControlFlow::Continue(include) = visitor.is_include_dir(&prefix, name)
                     else {
                         return Ok(());
                     };
                     if include {
-                        let child_prefix = if prefix.is_empty() {
-                            name.to_string()
-                        } else {
-                            format!("{prefix}/{name}")
-                        };
+                        METRICS.inc_visit_dir();
+
+                        let child_prefix = format_prefix_and_name(&prefix, name);
                         stack.push((child_prefix, entry.object_id()));
                     }
                 }
                 gix::object::tree::EntryKind::Blob
                 | gix::object::tree::EntryKind::BlobExecutable => {
+                    METRICS.inc_visit_file();
+
                     let ControlFlow::Continue(()) =
                         visitor.visit_blob(&prefix, name, entry.object_id())
                     else {
@@ -370,54 +459,54 @@ pub(crate) fn walk_tree_blobs(
     Ok(())
 }
 
-/// Simple glob matching against file path or filename.
-fn matches_glob(pattern: &str, path: &str) -> bool {
-    glob_match::glob_match(pattern, path)
-        || PathBuf::from(path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|name| glob_match::glob_match(pattern, name))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn glob_question_mark_matches_single_char() {
-        assert!(matches_glob("file?.txt", "file1.txt"));
-    }
-
-    #[test]
-    fn glob_question_mark_does_not_cross_slash() {
-        assert!(!matches_glob("dir?.txt", "dir/a.txt"));
-    }
-
-    #[test]
-    fn glob_question_mark_does_not_match_empty() {
-        assert!(!matches_glob("file?.txt", "file.txt"));
-    }
-
-    #[test]
-    fn glob_character_class() {
-        assert!(matches_glob("file[0-9].txt", "file3.txt"));
-        assert!(!matches_glob("file[0-9].txt", "filea.txt"));
-    }
-
-    #[test]
-    fn glob_star_does_not_cross_slash() {
-        assert!(!matches_glob("src/*.rs", "src/foo/bar.rs"));
-    }
-
-    #[test]
-    fn glob_double_star_crosses_slash() {
-        assert!(matches_glob("src/**/*.rs", "src/foo/bar.rs"));
-        assert!(matches_glob("src/**/*.rs", "src/foo/baz/qux/bar.rs"));
-        assert!(!matches_glob("src/*/*.rs", "src/foo/baz/bar.rs"));
-    }
-
-    #[test]
-    fn glob_filename_fallback() {
-        assert!(matches_glob("*.rs", "src/main.rs"));
-    }
-}
+// /// Simple glob matching against file path or filename.
+// fn matches_glob(pattern: &str, path: String) -> bool {
+//     glob_match::glob_match(pattern, &path)
+//         || PathBuf::from(path)
+//             .file_name()
+//             .and_then(|n| n.to_str())
+//             .is_some_and(|name| glob_match::glob_match(pattern, name))
+// }
+//
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//
+//     #[test]
+//     fn glob_question_mark_matches_single_char() {
+//         assert!(matches_glob("file?.txt", "file1.txt".into()));
+//     }
+//
+//     #[test]
+//     fn glob_question_mark_does_not_cross_slash() {
+//         assert!(!matches_glob("dir?.txt", "dir/a.txt".into()));
+//     }
+//
+//     #[test]
+//     fn glob_question_mark_does_not_match_empty() {
+//         assert!(!matches_glob("file?.txt", "file.txt".into()));
+//     }
+//
+//     #[test]
+//     fn glob_character_class() {
+//         assert!(matches_glob("file[0-9].txt", "file3.txt".into()));
+//         assert!(!matches_glob("file[0-9].txt", "filea.txt".into()));
+//     }
+//
+//     #[test]
+//     fn glob_star_does_not_cross_slash() {
+//         assert!(!matches_glob("src/*.rs", "src/foo/bar.rs".into()));
+//     }
+//
+//     #[test]
+//     fn glob_double_star_crosses_slash() {
+//         assert!(matches_glob("src/**/*.rs", "src/foo/bar.rs".into()));
+//         assert!(matches_glob("src/**/*.rs", "src/foo/baz/qux/bar.rs".into()));
+//         assert!(!matches_glob("src/*/*.rs", "src/foo/baz/bar.rs".into()));
+//     }
+//
+//     #[test]
+//     fn glob_filename_fallback() {
+//         assert!(matches_glob("*.rs", "src/main.rs".into()));
+//     }
+// }

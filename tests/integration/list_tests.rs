@@ -71,6 +71,7 @@ fn list_exclude_filter() -> eyre::Result<()> {
             +file1.txt
             +file2.txt
             +other.md
+            +nested/another.md
             ",
         )?
         .run_cli(
