@@ -82,7 +82,6 @@ impl FileEntry {
 ///
 /// # Errors
 /// Returns an error if reading the Git repository fails or it contains invalid data.
-#[allow(clippy::too_many_lines)]
 pub fn list_files(
     directory: &std::path::Path,
     pathspecs: &[String],
@@ -109,14 +108,7 @@ pub fn list_files(
         .try_into_commit()
         .wrap_err("HEAD is not a commit")?;
 
-    let head_date = {
-        let t = head_commit.time().wrap_err("HEAD commit time")?;
-        jiff::Timestamp::from_second(t.seconds as i64)
-            .wrap_err("timestamp")?
-            .to_zoned(jiff::tz::TimeZone::UTC)
-            .date()
-    };
-
+    let head_date = commit_date(head_commit.time().wrap_err("HEAD commit time")?.seconds)?;
     let head_tree_id = head_commit.tree().wrap_err("HEAD tree")?.id;
 
     // Apply pathspec and exclude filters immediately (Step 1).
@@ -131,39 +123,17 @@ pub fn list_files(
     let mut file_dates: HashMap<String, (Date, ObjectId)> = HashMap::new();
 
     // Date HEAD's changes against its parent.
-    {
-        let head_parent_id: Option<ObjectId> = {
-            let decoded = head_commit.decode().wrap_err("decode HEAD commit")?;
-            decoded
-                .parents
-                .first()
-                .map(|hex| gix::ObjectId::from_hex(hex))
-                .transpose()
-                .wrap_err("parse HEAD parent id")?
-        };
-        let head_parent_subset: HashMap<String, ObjectId> = if let Some(pid) = head_parent_id {
-            METRICS.inc_find_object();
-            let parent_commit = repo
-                .find_object(pid)
-                .wrap_err("find HEAD parent")?
-                .try_into_commit()
-                .wrap_err("HEAD parent not a commit")?;
-            let parent_tree_id = parent_commit.tree().wrap_err("HEAD parent tree")?.id;
-            // Step 3: filtered visitor prunes subtrees with no remaining files.
-            let mut v = RemainingFilteredCollector::new(&remaining);
-            walk_tree_blobs(&repo, parent_tree_id, &mut v)?;
-            v.into_map()
-        } else {
-            HashMap::new()
-        };
-
-        for (path, blob_hash) in &head_filtered {
-            if head_parent_subset.get(path) != Some(blob_hash) {
-                file_dates.insert(path.clone(), (head_date, *blob_hash));
-                remaining.remove(path);
-            }
-        }
-    }
+    let head_parent_id = {
+        let decoded = head_commit.decode().wrap_err("decode HEAD commit")?;
+        decoded
+            .parents
+            .first()
+            .map(|hex| gix::ObjectId::from_hex(hex))
+            .transpose()
+            .wrap_err("parse HEAD parent id")?
+    };
+    let head_parent_subset = walk_parent_blobs(&repo, head_parent_id, &remaining)?;
+    apply_diff(&head_filtered, &head_parent_subset, head_date, &mut file_dates, &mut remaining);
 
     // Walk older commits with the filtered visitor.
     for info in commits_iter {
@@ -179,21 +149,17 @@ pub fn list_files(
             .try_into_commit()
             .wrap_err_with(|| format!("not a commit: {}", info.id))?;
 
-        let commit_time = commit.time().wrap_err("commit time")?;
-        let date = jiff::Timestamp::from_second(commit_time.seconds as i64)
-            .wrap_err("timestamp")?
-            .to_zoned(jiff::tz::TimeZone::UTC)
-            .date();
-
+        let date = commit_date(commit.time().wrap_err("commit time")?.seconds)?;
         let tree_id = commit.tree().wrap_err("commit tree")?.id;
+
         // Step 3: filtered visitor prunes subtrees with no remaining files.
-        let current_subset: HashMap<String, ObjectId> = {
+        let current_subset = {
             let mut v = RemainingFilteredCollector::new(&remaining);
             walk_tree_blobs(&repo, tree_id, &mut v)?;
             v.into_map()
         };
 
-        let parent_id: Option<ObjectId> = {
+        let parent_id = {
             let decoded = commit.decode().wrap_err("decode commit")?;
             decoded
                 .parents
@@ -202,27 +168,8 @@ pub fn list_files(
                 .transpose()
                 .wrap_err("parse parent id")?
         };
-        let parent_subset: HashMap<String, ObjectId> = if let Some(pid) = parent_id {
-            METRICS.inc_find_object();
-            let parent_commit = repo
-                .find_object(pid)
-                .wrap_err("find parent")?
-                .try_into_commit()
-                .wrap_err("parent not a commit")?;
-            let parent_tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
-            let mut v = RemainingFilteredCollector::new(&remaining);
-            walk_tree_blobs(&repo, parent_tree_id, &mut v)?;
-            v.into_map()
-        } else {
-            HashMap::new()
-        };
-
-        for (path, blob_hash) in &current_subset {
-            if parent_subset.get(path) != Some(blob_hash) {
-                file_dates.insert(path.clone(), (date, *blob_hash));
-                remaining.remove(path);
-            }
-        }
+        let parent_subset = walk_parent_blobs(&repo, parent_id, &remaining)?;
+        apply_diff(&current_subset, &parent_subset, date, &mut file_dates, &mut remaining);
     }
 
     let mut entries: Vec<FileEntry> = file_dates
@@ -242,6 +189,50 @@ pub fn list_files(
     }
 
     Ok(entries)
+}
+
+fn commit_date(seconds: i64) -> eyre::Result<Date> {
+    let ts = jiff::Timestamp::from_second(seconds).wrap_err("timestamp")?;
+    Ok(ts.to_zoned(jiff::tz::TimeZone::UTC).date())
+}
+
+/// Walk `parent_id`'s tree and collect the blob map filtered to `remaining` paths.
+/// Returns an empty map when `parent_id` is `None` (root commit).
+fn walk_parent_blobs(
+    repo: &gix::Repository,
+    parent_id: Option<ObjectId>,
+    remaining: &HashSet<String>,
+) -> eyre::Result<HashMap<String, ObjectId>> {
+    let Some(pid) = parent_id else {
+        return Ok(HashMap::new());
+    };
+    METRICS.inc_find_object();
+    let parent_commit = repo
+        .find_object(pid)
+        .wrap_err("find parent commit")?
+        .try_into_commit()
+        .wrap_err("parent not a commit")?;
+    let parent_tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
+    let mut v = RemainingFilteredCollector::new(remaining);
+    walk_tree_blobs(repo, parent_tree_id, &mut v)?;
+    Ok(v.into_map())
+}
+
+/// For each path in `current` whose blob differs from `parent`, record `date` in
+/// `file_dates` and remove the path from `remaining`.
+fn apply_diff(
+    current: &HashMap<String, ObjectId>,
+    parent: &HashMap<String, ObjectId>,
+    date: Date,
+    file_dates: &mut HashMap<String, (Date, ObjectId)>,
+    remaining: &mut HashSet<String>,
+) {
+    for (path, blob_hash) in current {
+        if parent.get(path) != Some(blob_hash) {
+            file_dates.insert(path.clone(), (date, *blob_hash));
+            remaining.remove(path);
+        }
+    }
 }
 
 /// Visitor called by [`walk_tree_blobs`] for each tree entry.
@@ -459,54 +450,3 @@ pub(crate) fn walk_tree_blobs(
     Ok(())
 }
 
-// /// Simple glob matching against file path or filename.
-// fn matches_glob(pattern: &str, path: String) -> bool {
-//     glob_match::glob_match(pattern, &path)
-//         || PathBuf::from(path)
-//             .file_name()
-//             .and_then(|n| n.to_str())
-//             .is_some_and(|name| glob_match::glob_match(pattern, name))
-// }
-//
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//
-//     #[test]
-//     fn glob_question_mark_matches_single_char() {
-//         assert!(matches_glob("file?.txt", "file1.txt".into()));
-//     }
-//
-//     #[test]
-//     fn glob_question_mark_does_not_cross_slash() {
-//         assert!(!matches_glob("dir?.txt", "dir/a.txt".into()));
-//     }
-//
-//     #[test]
-//     fn glob_question_mark_does_not_match_empty() {
-//         assert!(!matches_glob("file?.txt", "file.txt".into()));
-//     }
-//
-//     #[test]
-//     fn glob_character_class() {
-//         assert!(matches_glob("file[0-9].txt", "file3.txt".into()));
-//         assert!(!matches_glob("file[0-9].txt", "filea.txt".into()));
-//     }
-//
-//     #[test]
-//     fn glob_star_does_not_cross_slash() {
-//         assert!(!matches_glob("src/*.rs", "src/foo/bar.rs".into()));
-//     }
-//
-//     #[test]
-//     fn glob_double_star_crosses_slash() {
-//         assert!(matches_glob("src/**/*.rs", "src/foo/bar.rs".into()));
-//         assert!(matches_glob("src/**/*.rs", "src/foo/baz/qux/bar.rs".into()));
-//         assert!(!matches_glob("src/*/*.rs", "src/foo/baz/bar.rs".into()));
-//     }
-//
-//     #[test]
-//     fn glob_filename_fallback() {
-//         assert!(matches_glob("*.rs", "src/main.rs".into()));
-//     }
-// }
