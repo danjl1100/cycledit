@@ -41,7 +41,7 @@ fn metrics_baseline() -> eyre::Result<()> {
         .init_git(METRICS_FIXTURE)?
         .with_metrics()
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"])?;
-    insta::assert_snapshot!(output.stderr);
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=11, visited_dirs=3, visited_files=11");
     Ok(())
 }
 
@@ -162,7 +162,7 @@ impl BlocksIter for &DatedBlocks<'_> {
                     files_in_each_dir,
                     regular_paths,
                 },
-            ) = *block;
+            ) = block;
 
             let mut block_visitor = visitor
                 .take()
@@ -175,8 +175,11 @@ impl BlocksIter for &DatedBlocks<'_> {
                 const TREE_SEPARATOR: char = '/';
                 let full_tree = {
                     let mut s = String::new();
-                    for p in *tree {
-                        write!(&mut s, "{p}{TREE_SEPARATOR}").expect("infallible");
+                    for p in tree {
+                        if !s.is_empty() {
+                            write!(&mut s, "{TREE_SEPARATOR}").expect("infallible");
+                        }
+                        write!(&mut s, "{p}").expect("infallible");
                     }
                     s
                 };
@@ -231,11 +234,11 @@ impl std::fmt::Display for Op {
         write!(f, "{op}")
     }
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct HighDepthTree<'a> {
-    trees: &'a [&'a [&'a str]],
-    files_in_each_dir: &'a [(Op, &'a str, u32)],
-    regular_paths: &'a [(Op, &'a str)],
+    trees: Vec<Vec<&'a str>>,
+    files_in_each_dir: Vec<(Op, &'a str, u32)>,
+    regular_paths: Vec<(Op, &'a str)>,
 }
 // TODO remove if unused (mostly a proof-of-concept for the visitor traits)
 impl std::fmt::Display for DatedBlocks<'_> {
@@ -301,13 +304,13 @@ fn metrics_high_depth() -> eyre::Result<()> {
         blocks: &[(
             "2025-06-24",
             HighDepthTree {
-                trees: &[
+                trees: vec![
                     //
-                    &*numbers,
-                    &["other", "tree"],
+                    numbers,
+                    vec!["other", "tree"],
                 ],
-                files_in_each_dir: &[(Op::Add, "f", 1)],
-                regular_paths: &[
+                files_in_each_dir: vec![(Op::Add, "f", 1)],
+                regular_paths: vec![
                     (Op::Add, "regular1.txt"),
                     (Op::Add, "zzz/another_regular.txt"),
                 ],
@@ -323,7 +326,7 @@ fn metrics_high_depth() -> eyre::Result<()> {
         "2026-01-01T00:00:00+00:00[UTC]",
         &["list", "regular1.txt", "zzz/*"],
     )?;
-    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=55");
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=55, visited_dirs=53, visited_files=102");
     insta::assert_snapshot!(output.stdout, @r"
     2025-06-24 regular1.txt
     2025-06-24 zzz/another_regular.txt
@@ -334,7 +337,7 @@ fn metrics_high_depth() -> eyre::Result<()> {
         "2026-01-01T00:00:00+00:00[UTC]",
         &["list", "--exclude", "folder_*", "--exclude", "other*"],
     )?;
-    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=3");
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=3, visited_dirs=1, visited_files=2");
     assert_eq!(output_stdout_1, output.stdout);
 
     Ok(())
@@ -355,18 +358,17 @@ fn metrics_wide_breadth() -> eyre::Result<()> {
         .copied()
         .chain(numbers.iter().copied())
         .chain(mixed.iter().map(|s| &**s))
-        .map(|first| [first, "tree"])
+        .map(|first| vec![first, "tree"])
         .collect();
-    let large_forest_of_trees: Vec<_> = large_forest_of_trees.iter().map(|s| &s[..]).collect();
 
     let blocks = DatedBlocks {
         blocks: &[
             (
                 "2025-01-01",
                 HighDepthTree {
-                    trees: &large_forest_of_trees,
-                    files_in_each_dir: &[(Op::Add, "f", 2)],
-                    regular_paths: &[
+                    trees: large_forest_of_trees,
+                    files_in_each_dir: vec![(Op::Add, "f", 2)],
+                    regular_paths: vec![
                         (Op::Add, "distraction.txt"),
                         (Op::Add, "another/distraction.txt"),
                     ],
@@ -375,9 +377,9 @@ fn metrics_wide_breadth() -> eyre::Result<()> {
             (
                 "2025-01-02",
                 HighDepthTree {
-                    trees: &[&*letters, &*numbers],
-                    files_in_each_dir: &[(Op::Add, "f", 1)],
-                    regular_paths: &[
+                    trees: vec![letters, numbers],
+                    files_in_each_dir: vec![(Op::Add, "f", 1)],
+                    regular_paths: vec![
                         (Op::Add, "mix_valid_24/plausible_tree/regular1.txt"),
                         (Op::Add, "zzz/another_regular.txt"),
                     ],
@@ -394,7 +396,7 @@ fn metrics_wide_breadth() -> eyre::Result<()> {
         "2026-01-01T00:00:00+00:00[UTC]",
         &["list", "regular1.txt", "zzz/*"],
     )?;
-    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=122");
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=122, visited_dirs=118, visited_files=181");
     insta::assert_snapshot!(output.stdout, @r"
     2025-01-02 mix_valid_24/plausible_tree/regular1.txt
     2025-01-02 zzz/another_regular.txt
@@ -413,8 +415,115 @@ fn metrics_wide_breadth() -> eyre::Result<()> {
             "distraction.txt",
         ],
     )?;
-    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=8");
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=8, visited_dirs=4, visited_files=5");
     assert_eq!(output_stdout_1, output.stdout);
+
+    Ok(())
+}
+
+#[test]
+fn metrics_long_commit_history() -> eyre::Result<()> {
+    let letters = PrefixedList::new("folder_", 'a'..='g');
+    let letters = letters.collect_refs();
+
+    let trees_for_op = |op| HighDepthTree {
+        trees: vec![letters.clone()],
+        files_in_each_dir: vec![(op, "toggle_file", 1)],
+        regular_paths: vec![],
+    };
+
+    let many_final_files = PrefixedList::new("final_", 0..20);
+    let many_final_files = many_final_files.collect_refs();
+
+    let final_files: Vec<_> = [
+        (Op::Add, "recent_file_1.txt"),
+        (Op::Add, "recent_file_2.txt"),
+        (Op::Remove, "ancient_file_will_be_deleted.txt"),
+    ]
+    .into_iter()
+    .chain(many_final_files.into_iter().map(|s| (Op::Add, s)))
+    .collect();
+
+    let blocks = DatedBlocks {
+        blocks: &[
+            (
+                "1970-01-29",
+                HighDepthTree {
+                    trees: vec![],
+                    files_in_each_dir: vec![],
+                    regular_paths: vec![
+                        //
+                        (Op::Add, "ancient_file.txt"),
+                        (Op::Add, "ancient_file_will_be_deleted.txt"),
+                    ],
+                },
+            ),
+            ("1980-01-01", trees_for_op(Op::Add)),
+            ("1980-01-02", trees_for_op(Op::Remove)),
+            ("1980-01-03", trees_for_op(Op::Add)),
+            ("1980-01-04", trees_for_op(Op::Remove)),
+            ("1980-01-05", trees_for_op(Op::Add)),
+            ("1980-01-06", trees_for_op(Op::Remove)),
+            ("1980-01-07", trees_for_op(Op::Add)),
+            ("1980-01-08", trees_for_op(Op::Remove)),
+            ("1980-01-09", trees_for_op(Op::Add)),
+            ("1980-01-10", trees_for_op(Op::Remove)),
+            ("1980-01-11", trees_for_op(Op::Add)),
+            ("1980-01-12", trees_for_op(Op::Remove)),
+            ("1980-01-13", trees_for_op(Op::Add)),
+            ("1980-01-14", trees_for_op(Op::Remove)),
+            ("1980-01-15", trees_for_op(Op::Add)),
+            ("1980-01-16", trees_for_op(Op::Remove)),
+            ("1980-01-17", trees_for_op(Op::Add)),
+            ("1980-01-18", trees_for_op(Op::Remove)),
+            ("1980-01-19", trees_for_op(Op::Add)),
+            ("1980-01-20", trees_for_op(Op::Remove)),
+            (
+                "1980-02-01",
+                HighDepthTree {
+                    trees: vec![],
+                    files_in_each_dir: vec![],
+                    regular_paths: final_files,
+                },
+            ),
+        ],
+    };
+
+    let harness = TestHarness::new()?
+        .init_git_from_blocks(&blocks)?
+        .with_metrics();
+
+    let output = harness.run_cli(
+        "2000-01-01T00:00:00[UTC]",
+        &["list", "--exclude", "final_*"],
+    )?;
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=86, visited_dirs=0, visited_files=107");
+    insta::assert_snapshot!(output.stdout, @r"
+    1970-01-29 ancient_file.txt
+    1980-02-01 recent_file_1.txt
+    1980-02-01 recent_file_2.txt
+    ");
+
+    let output = harness.run_cli(
+        "2000-01-01T00:00:00[UTC]",
+        &[
+            "list",
+            "--exclude",
+            "ancient_file.txt",
+            "--exclude",
+            "final_*",
+        ],
+    )?;
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=4, visited_dirs=0, visited_files=25");
+    insta::assert_snapshot!(output.stdout, @r"
+    1980-02-01 recent_file_1.txt
+    1980-02-01 recent_file_2.txt
+    ");
+    let output_stdout_2 = output.stdout;
+
+    let output = harness.run_cli("2000-01-01T00:00:00[UTC]", &["list", "recent_file_*.txt"])?;
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=4, visited_dirs=0, visited_files=25");
+    assert_eq!(output_stdout_2, output.stdout);
 
     Ok(())
 }

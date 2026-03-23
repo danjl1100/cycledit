@@ -1,5 +1,8 @@
 use eyre::Context as _;
-use std::process::{Command, Output};
+use std::{
+    io::BufRead,
+    process::{Command, Output},
+};
 
 use self::git_ops_blocks::GitOpsBlocks;
 pub use self::path_and_parent::PathAndParent;
@@ -59,8 +62,23 @@ impl TestHarness {
         self.init_git_from_blocks(&blocks)
     }
     pub fn init_git_from_blocks(self, blocks: impl BlocksIter) -> eyre::Result<Self> {
+        const DEBUG_ON_ERROR: bool = false;
+
+        let path = self.dir.path();
+
         // perform I/O
-        self.init_git_io(blocks).wrap_err("init_git I/O failed")
+        let result = Self::init_git_io(blocks, path).wrap_err("init_git I/O failed");
+
+        if let Err(e) = &result
+            && DEBUG_ON_ERROR
+        {
+            // for debugging tests, keep the tempdir around until stdin receives a line
+            eprintln!("{}\n{e:?}", path.display());
+            let _ = std::io::stdin().lock().read_line(&mut String::new());
+            eprintln!("exit");
+        }
+
+        result.map(|()| self)
     }
 }
 impl<'a> GitOpsBlocks<'a> {
@@ -162,7 +180,7 @@ impl BlocksIter for &GitOpsBlocks<'_> {
 }
 
 impl TestHarness {
-    fn init_git_io(self, blocks: impl BlocksIter) -> eyre::Result<Self> {
+    fn init_git_io(blocks: impl BlocksIter, dir: &std::path::Path) -> eyre::Result<()> {
         struct Visitor<'a> {
             dir: &'a std::path::Path,
         }
@@ -240,15 +258,13 @@ impl TestHarness {
             }
         }
 
-        let dir = self.dir.path();
-
         run_git(dir, &["init", "-b", "main"])?;
         run_git(dir, &["config", "user.email", "test@example.com"])?;
         run_git(dir, &["config", "user.name", "Test"])?;
 
         blocks.visit_all(Visitor { dir })?;
 
-        Ok(self)
+        Ok(())
     }
 
     pub fn dump_fixture(&self) -> eyre::Result<String> {

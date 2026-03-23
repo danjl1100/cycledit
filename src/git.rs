@@ -5,14 +5,46 @@ use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-static FIND_OBJECT_CALLS: AtomicU64 = AtomicU64::new(0);
+static METRICS: Metrics = Metrics::new();
 
-fn inc_find_object() {
-    FIND_OBJECT_CALLS.fetch_add(1, Ordering::Relaxed);
+struct Metrics {
+    find_object_calls: AtomicU64,
+    visited_files: AtomicU64,
+    visited_dirs: AtomicU64,
 }
-
-fn get_find_object_count() -> u64 {
-    FIND_OBJECT_CALLS.load(Ordering::Relaxed)
+impl Metrics {
+    const fn new() -> Self {
+        Self {
+            find_object_calls: AtomicU64::new(0),
+            visited_files: AtomicU64::new(0),
+            visited_dirs: AtomicU64::new(0),
+        }
+    }
+    fn inc_find_object(&self) {
+        self.find_object_calls.fetch_add(1, Ordering::Relaxed);
+    }
+    fn inc_visit_file(&self) {
+        self.visited_files.fetch_add(1, Ordering::Relaxed);
+    }
+    fn inc_visit_dir(&self) {
+        self.visited_dirs.fetch_add(1, Ordering::Relaxed);
+    }
+}
+impl std::fmt::Display for Metrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            find_object_calls,
+            visited_files,
+            visited_dirs,
+        } = self;
+        let find_object_calls = find_object_calls.load(Ordering::Relaxed);
+        let visited_dirs = visited_dirs.load(Ordering::Relaxed);
+        let visited_files = visited_files.load(Ordering::Relaxed);
+        write!(
+            f,
+            "metrics: find_object_calls={find_object_calls}, visited_dirs={visited_dirs}, visited_files={visited_files}"
+        )
+    }
 }
 
 use eyre::WrapErr;
@@ -70,7 +102,7 @@ pub fn list_files(
     };
     let head_info = head_info.wrap_err("rev-walk failed")?;
 
-    inc_find_object();
+    METRICS.inc_find_object();
     let head_commit = repo
         .find_object(head_info.id)
         .wrap_err("find HEAD commit")?
@@ -110,7 +142,7 @@ pub fn list_files(
                 .wrap_err("parse HEAD parent id")?
         };
         let head_parent_subset: HashMap<String, ObjectId> = if let Some(pid) = head_parent_id {
-            inc_find_object();
+            METRICS.inc_find_object();
             let parent_commit = repo
                 .find_object(pid)
                 .wrap_err("find HEAD parent")?
@@ -140,7 +172,7 @@ pub fn list_files(
         }
         let info = info.wrap_err("rev-walk failed")?;
 
-        inc_find_object();
+        METRICS.inc_find_object();
         let commit = repo
             .find_object(info.id)
             .wrap_err("find commit")?
@@ -171,7 +203,7 @@ pub fn list_files(
                 .wrap_err("parse parent id")?
         };
         let parent_subset: HashMap<String, ObjectId> = if let Some(pid) = parent_id {
-            inc_find_object();
+            METRICS.inc_find_object();
             let parent_commit = repo
                 .find_object(pid)
                 .wrap_err("find parent")?
@@ -206,7 +238,7 @@ pub fn list_files(
 
     let is_log_metrics = std::env::var("CYCLEDIT_LOG_METRICS").as_deref() == Ok("1");
     if is_log_metrics {
-        eprintln!("metrics: find_object_calls={}", get_find_object_count());
+        eprintln!("{METRICS}");
     }
 
     Ok(entries)
@@ -386,7 +418,7 @@ pub(crate) fn walk_tree_blobs(
 ) -> eyre::Result<()> {
     let mut stack = vec![(String::new(), tree_id)];
     while let Some((prefix, tid)) = stack.pop() {
-        inc_find_object();
+        METRICS.inc_find_object();
         let tree = repo
             .find_object(tid)
             .wrap_err("find tree obj")?
@@ -404,12 +436,16 @@ pub(crate) fn walk_tree_blobs(
                         return Ok(());
                     };
                     if include {
+                        METRICS.inc_visit_dir();
+
                         let child_prefix = format_prefix_and_name(&prefix, name);
                         stack.push((child_prefix, entry.object_id()));
                     }
                 }
                 gix::object::tree::EntryKind::Blob
                 | gix::object::tree::EntryKind::BlobExecutable => {
+                    METRICS.inc_visit_file();
+
                     let ControlFlow::Continue(()) =
                         visitor.visit_blob(&prefix, name, entry.object_id())
                     else {
