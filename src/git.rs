@@ -1,6 +1,6 @@
 //! Git repository introspection.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -120,7 +120,8 @@ pub fn list_files(
 
     // Step 2: Track files that still need a date; exit early once all are dated.
     let mut remaining: HashSet<String> = head_filtered.keys().cloned().collect();
-    let mut file_dates: HashMap<String, (Date, ObjectId)> = HashMap::new();
+    // BTreeMap keeps entries sorted by path, so no explicit sort is needed at the end.
+    let mut file_dates: BTreeMap<String, (Date, ObjectId)> = BTreeMap::new();
 
     // Date HEAD's changes against its parent.
     let head_parent_id = {
@@ -132,8 +133,25 @@ pub fn list_files(
             .transpose()
             .wrap_err("parse HEAD parent id")?
     };
-    let head_parent_subset = walk_parent_blobs(&repo, head_parent_id, &remaining)?;
-    apply_diff(&head_filtered, &head_parent_subset, head_date, &mut file_dates, &mut remaining);
+    let (head_parent_tree_id, head_parent_subset) =
+        walk_parent_blobs(&repo, head_parent_id, &remaining)?;
+    apply_diff(
+        &head_filtered,
+        &head_parent_subset,
+        head_date,
+        &mut file_dates,
+        &mut remaining,
+    );
+
+    // Cache the most recently walked parent tree so the next loop iteration can reuse it
+    // as its current tree (linear-history optimisation: commit N-1's tree == commit N's
+    // parent tree).  For merge commits the cache simply won't hit.
+    //
+    // Note: gix's built-in object cache would save disk I/O for repeated reads of the
+    // same object, but walking the tree and building the HashMap would still be repeated;
+    // the explicit cache here avoids that redundant work entirely.
+    let mut cached_tree: Option<(ObjectId, HashMap<String, ObjectId>)> =
+        head_parent_tree_id.map(|id| (id, head_parent_subset));
 
     // Walk older commits with the filtered visitor.
     for info in commits_iter {
@@ -153,10 +171,19 @@ pub fn list_files(
         let tree_id = commit.tree().wrap_err("commit tree")?.id;
 
         // Step 3: filtered visitor prunes subtrees with no remaining files.
-        let current_subset = {
-            let mut v = RemainingFilteredCollector::new(&remaining);
-            walk_tree_blobs(&repo, tree_id, &mut v)?;
-            v.into_map()
+        // Reuse the cached parent tree walk when the tree id matches (linear history).
+        let current_subset = match cached_tree.take() {
+            Some((cached_id, mut cached_map)) if cached_id == tree_id => {
+                // The cached map may contain paths dated in the previous iteration;
+                // filter it down to only the still-undated files before comparing.
+                cached_map.retain(|path, _| remaining.contains(path.as_str()));
+                cached_map
+            }
+            _ => {
+                let mut v = RemainingFilteredCollector::new(&remaining);
+                walk_tree_blobs(&repo, tree_id, &mut v)?;
+                v.into_map()
+            }
         };
 
         let parent_id = {
@@ -168,11 +195,20 @@ pub fn list_files(
                 .transpose()
                 .wrap_err("parse parent id")?
         };
-        let parent_subset = walk_parent_blobs(&repo, parent_id, &remaining)?;
-        apply_diff(&current_subset, &parent_subset, date, &mut file_dates, &mut remaining);
+        let (parent_tree_id, parent_subset) = walk_parent_blobs(&repo, parent_id, &remaining)?;
+        apply_diff(
+            &current_subset,
+            &parent_subset,
+            date,
+            &mut file_dates,
+            &mut remaining,
+        );
+
+        // Cache this parent for the next iteration.
+        cached_tree = parent_tree_id.map(|id| (id, parent_subset));
     }
 
-    let mut entries: Vec<FileEntry> = file_dates
+    let entries: Vec<FileEntry> = file_dates
         .into_iter()
         .map(|(path, (date, blob_hash))| FileEntry {
             date,
@@ -180,8 +216,6 @@ pub fn list_files(
             path: PathBuf::from(path),
         })
         .collect();
-
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
 
     let is_log_metrics = std::env::var("CYCLEDIT_LOG_METRICS").as_deref() == Ok("1");
     if is_log_metrics {
@@ -197,14 +231,15 @@ fn commit_date(seconds: i64) -> eyre::Result<Date> {
 }
 
 /// Walk `parent_id`'s tree and collect the blob map filtered to `remaining` paths.
-/// Returns an empty map when `parent_id` is `None` (root commit).
+/// Also returns the parent tree's `ObjectId` so the caller can cache the result.
+/// Returns `(None, empty map)` when `parent_id` is `None` (root commit).
 fn walk_parent_blobs(
     repo: &gix::Repository,
     parent_id: Option<ObjectId>,
     remaining: &HashSet<String>,
-) -> eyre::Result<HashMap<String, ObjectId>> {
+) -> eyre::Result<(Option<ObjectId>, HashMap<String, ObjectId>)> {
     let Some(pid) = parent_id else {
-        return Ok(HashMap::new());
+        return Ok((None, HashMap::new()));
     };
     METRICS.inc_find_object();
     let parent_commit = repo
@@ -215,7 +250,7 @@ fn walk_parent_blobs(
     let parent_tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
     let mut v = RemainingFilteredCollector::new(remaining);
     walk_tree_blobs(repo, parent_tree_id, &mut v)?;
-    Ok(v.into_map())
+    Ok((Some(parent_tree_id), v.into_map()))
 }
 
 /// For each path in `current` whose blob differs from `parent`, record `date` in
@@ -224,7 +259,7 @@ fn apply_diff(
     current: &HashMap<String, ObjectId>,
     parent: &HashMap<String, ObjectId>,
     date: Date,
-    file_dates: &mut HashMap<String, (Date, ObjectId)>,
+    file_dates: &mut BTreeMap<String, (Date, ObjectId)>,
     remaining: &mut HashSet<String>,
 ) {
     for (path, blob_hash) in current {
@@ -449,4 +484,3 @@ pub(crate) fn walk_tree_blobs(
     }
     Ok(())
 }
-
