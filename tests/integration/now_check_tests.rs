@@ -20,9 +20,9 @@ fn now_shows_only_past_and_today_chunks() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2025-06-01:
-    \tfile1.txt
+    	file1.txt
     ");
     Ok(())
 }
@@ -64,7 +64,7 @@ fn check_warn_when_files_due() -> eyre::Result<()> {
     assert_eq!(output.status.code(), Some(100));
     assert_eq!(output.stderr, "");
     // ceil(7/365) = 1 per chunk; only the first chunk falls on today (1 of 3 files)
-    insta::assert_snapshot!(output.stdout, @"WARN: Need to update 1 file(s) now (of 3 files total)\n");
+    insta::assert_snapshot!(output.stdout, @"WARN: Need to update 1 file(s) now (of 3 files total)");
     Ok(())
 }
 
@@ -83,7 +83,7 @@ fn check_pass_when_nothing_due() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"PASS: All files up to date\n");
+    insta::assert_snapshot!(output.stdout, @"PASS: All files up to date");
     Ok(())
 }
 
@@ -112,9 +112,9 @@ fn current_time_zoned_drives_today() -> eyre::Result<()> {
     )?;
     assert_eq!(output_on.status.code(), Some(0));
     assert_eq!(output_on.stderr, "");
-    insta::assert_snapshot!(output_on.stdout, @"
+    insta::assert_snapshot!(output_on.stdout, @r"
     2024-01-11:
-    \tfile1.txt
+    	file1.txt
     ");
     Ok(())
 }

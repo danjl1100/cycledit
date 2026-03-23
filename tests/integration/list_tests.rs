@@ -13,7 +13,7 @@ fn list_single_file() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"2001-05-22 root-file.txt\n");
+    insta::assert_snapshot!(output.stdout, @"2001-05-22 root-file.txt");
     Ok(())
 }
 
@@ -32,7 +32,7 @@ fn list_multiple_sorted_lexicographically() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2001-05-22 aaa.txt
     2001-05-22 folder1/file.txt
     2001-05-22 zzz.txt
@@ -55,7 +55,7 @@ fn list_pathspec_filter() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2001-05-22 file1.txt
     2001-05-22 file2.txt
     ");
@@ -81,7 +81,7 @@ fn list_exclude_filter() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2001-05-22 file1.txt
     2001-05-22 file2.txt
     ");

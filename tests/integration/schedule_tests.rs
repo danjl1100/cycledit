@@ -104,13 +104,13 @@ fn schedule_all_overdue_lands_in_today() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
-    \tfile2.txt
+    	file2.txt
     2026-01-08:
-    \tfile1.txt
+    	file1.txt
     2026-01-15:
-    \tfile3.txt
+    	file3.txt
     ");
     Ok(())
 }
@@ -136,11 +136,11 @@ fn schedule_future_dates() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2026-01-04:
-    \tfile1.txt
+    	file1.txt
     2026-07-05:
-    \tfile2.txt
+    	file2.txt
     ");
     Ok(())
 }
@@ -164,9 +164,9 @@ fn schedule_custom_cycle_and_chunk() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2024-02-06:
-    \tfile1.txt
+    	file1.txt
     ");
     Ok(())
 }
@@ -187,11 +187,11 @@ fn schedule_same_date_deterministic_order() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
-    \tzzz.txt
+    	zzz.txt
     2026-01-08:
-    \taaa.txt
+    	aaa.txt
     ");
     Ok(())
 }
@@ -221,11 +221,11 @@ fn schedule_chunk_alignment() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
-    \tfile_a.txt
+    	file_a.txt
     2026-01-08:
-    \tfile_b.txt
+    	file_b.txt
     ");
     Ok(())
 }
@@ -259,13 +259,13 @@ fn schedule_chunk_alignment_short_chunk() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
-    \tfile_a.txt
+    	file_a.txt
     2026-01-04:
-    \tfile_b.txt
+    	file_b.txt
     2026-01-07:
-    \tfile_c.txt
+    	file_c.txt
     ");
     Ok(())
 }
@@ -292,11 +292,11 @@ fn schedule_overflow_to_next_chunk() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stderr, "");
-    insta::assert_snapshot!(output.stdout, @"
+    insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
-    \tfile2.txt
+    	file2.txt
     2026-01-11:
-    \tfile1.txt
+    	file1.txt
     ");
     Ok(())
 }
