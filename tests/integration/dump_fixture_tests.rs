@@ -41,7 +41,7 @@ fn metrics_baseline() -> eyre::Result<()> {
         .init_git(METRICS_FIXTURE)?
         .with_metrics()
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["list"])?;
-    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=11, visited_dirs=3, visited_files=11");
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=9, visited_dirs=2, visited_files=8");
     Ok(())
 }
 
@@ -497,7 +497,7 @@ fn metrics_long_commit_history() -> eyre::Result<()> {
         "2000-01-01T00:00:00[UTC]",
         &["list", "--exclude", "final_*"],
     )?;
-    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=86, visited_dirs=0, visited_files=107");
+    insta::assert_snapshot!(output.stderr, @"metrics: find_object_calls=65, visited_dirs=0, visited_files=65");
     insta::assert_snapshot!(output.stdout, @r"
     1970-01-29 ancient_file.txt
     1980-02-01 recent_file_1.txt
