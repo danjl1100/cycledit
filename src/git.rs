@@ -133,11 +133,10 @@ pub fn list_files(
             .transpose()
             .wrap_err("parse HEAD parent id")?
     };
-    let (head_parent_tree_id, head_parent_subset) =
-        walk_parent_blobs(&repo, head_parent_id, &remaining)?;
+    let head_parent = walk_parent_blobs(&repo, head_parent_id, &remaining)?;
     apply_diff(
         &head_filtered,
-        &head_parent_subset,
+        &head_parent.blobs,
         head_date,
         &mut file_dates,
         &mut remaining,
@@ -151,7 +150,7 @@ pub fn list_files(
     // same object, but walking the tree and building the HashMap would still be repeated;
     // the explicit cache here avoids that redundant work entirely.
     let mut cached_tree: Option<(ObjectId, HashMap<String, ObjectId>)> =
-        head_parent_tree_id.map(|id| (id, head_parent_subset));
+        head_parent.tree_id.map(|id| (id, head_parent.blobs));
 
     // Walk older commits with the filtered visitor.
     for info in commits_iter {
@@ -195,17 +194,17 @@ pub fn list_files(
                 .transpose()
                 .wrap_err("parse parent id")?
         };
-        let (parent_tree_id, parent_subset) = walk_parent_blobs(&repo, parent_id, &remaining)?;
+        let parent = walk_parent_blobs(&repo, parent_id, &remaining)?;
         apply_diff(
             &current_subset,
-            &parent_subset,
+            &parent.blobs,
             date,
             &mut file_dates,
             &mut remaining,
         );
 
         // Cache this parent for the next iteration.
-        cached_tree = parent_tree_id.map(|id| (id, parent_subset));
+        cached_tree = parent.tree_id.map(|id| (id, parent.blobs));
     }
 
     let entries: Vec<FileEntry> = file_dates
@@ -225,21 +224,29 @@ pub fn list_files(
     Ok(entries)
 }
 
-fn commit_date(seconds: i64) -> eyre::Result<Date> {
+pub(crate) fn commit_date(seconds: i64) -> eyre::Result<Date> {
     let ts = jiff::Timestamp::from_second(seconds).wrap_err("timestamp")?;
     Ok(ts.to_zoned(jiff::tz::TimeZone::UTC).date())
 }
 
+struct ParentBlobsWalk {
+    /// Tree `ObjectId` of the parent; `None` for root commits. Used as the cache key.
+    tree_id: Option<ObjectId>,
+    /// Blob map of the parent's tree, filtered to `remaining` paths.
+    blobs: HashMap<String, ObjectId>,
+}
+
 /// Walk `parent_id`'s tree and collect the blob map filtered to `remaining` paths.
-/// Also returns the parent tree's `ObjectId` so the caller can cache the result.
-/// Returns `(None, empty map)` when `parent_id` is `None` (root commit).
 fn walk_parent_blobs(
     repo: &gix::Repository,
     parent_id: Option<ObjectId>,
     remaining: &HashSet<String>,
-) -> eyre::Result<(Option<ObjectId>, HashMap<String, ObjectId>)> {
+) -> eyre::Result<ParentBlobsWalk> {
     let Some(pid) = parent_id else {
-        return Ok((None, HashMap::new()));
+        return Ok(ParentBlobsWalk {
+            tree_id: None,
+            blobs: HashMap::new(),
+        });
     };
     METRICS.inc_find_object();
     let parent_commit = repo
@@ -247,10 +254,13 @@ fn walk_parent_blobs(
         .wrap_err("find parent commit")?
         .try_into_commit()
         .wrap_err("parent not a commit")?;
-    let parent_tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
+    let tree_id = parent_commit.tree().wrap_err("parent tree")?.id;
     let mut v = RemainingFilteredCollector::new(remaining);
-    walk_tree_blobs(repo, parent_tree_id, &mut v)?;
-    Ok((Some(parent_tree_id), v.into_map()))
+    walk_tree_blobs(repo, tree_id, &mut v)?;
+    Ok(ParentBlobsWalk {
+        tree_id: Some(tree_id),
+        blobs: v.into_map(),
+    })
 }
 
 /// For each path in `current` whose blob differs from `parent`, record `date` in
