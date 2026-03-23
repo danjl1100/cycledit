@@ -35,7 +35,7 @@ pub fn dump_fixture_string(path: &Path) -> eyre::Result<String> {
             .try_into_commit()
             .wrap_err_with(|| format!("not a commit: {}", info.id))?;
 
-        let date = crate::git::commit_date(commit.time().wrap_err("commit time")?.seconds)?;
+        let date = crate::git::commit_date(&commit).wrap_err("commit date")?;
 
         let tree_id = commit.tree().wrap_err("commit tree")?.id;
         let current_blobs = {

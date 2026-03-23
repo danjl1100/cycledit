@@ -108,7 +108,7 @@ pub fn list_files(
         .try_into_commit()
         .wrap_err("HEAD is not a commit")?;
 
-    let head_date = commit_date(head_commit.time().wrap_err("HEAD commit time")?.seconds)?;
+    let head_date = commit_date(&head_commit).wrap_err("HEAD commit date")?;
     let head_tree_id = head_commit.tree().wrap_err("HEAD tree")?.id;
 
     // Apply pathspec and exclude filters immediately (Step 1).
@@ -165,7 +165,7 @@ pub fn list_files(
             .try_into_commit()
             .wrap_err_with(|| format!("not a commit: {}", info.id))?;
 
-        let date = commit_date(commit.time().wrap_err("commit time")?.seconds)?;
+        let date = commit_date(&commit).wrap_err("commit date")?;
         let tree_id = commit.tree().wrap_err("commit tree")?.id;
 
         // Step 3: filtered visitor prunes subtrees with no remaining files.
@@ -224,7 +224,9 @@ pub fn list_files(
     Ok(entries)
 }
 
-pub(crate) fn commit_date(seconds: i64) -> eyre::Result<Date> {
+pub(crate) fn commit_date(commit: &gix::Commit) -> eyre::Result<Date> {
+    let seconds = commit.time().wrap_err("commit time")?.seconds;
+
     let ts = jiff::Timestamp::from_second(seconds).wrap_err("timestamp")?;
     Ok(ts.to_zoned(jiff::tz::TimeZone::UTC).date())
 }
