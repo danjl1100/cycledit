@@ -270,9 +270,9 @@ fn schedule_chunk_alignment_short_chunk() -> eyre::Result<()> {
     Ok(())
 }
 
-/// When chunk capacity is exceeded, overflow spills into next chunk.
+/// When the chunk spans the whole cycle, only one chunk is allowed
 #[test]
-fn schedule_overflow_to_next_chunk() -> eyre::Result<()> {
+fn schedule_degenerate_single_chunk() -> eyre::Result<()> {
     // cycle=P10D, chunk=P10D → max_per_chunk = ceil(10/10) = 1
     // 2 overdue files → each gets its own chunk date
     // today = 2026-01-01
@@ -295,8 +295,96 @@ fn schedule_overflow_to_next_chunk() -> eyre::Result<()> {
     insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
     	file2.txt
-    2026-01-11:
     	file1.txt
+    ");
+    Ok(())
+}
+
+/// When there are more items than chunks in 1 cycle, chunks accumulate multiple items
+#[test]
+fn schedule_fills_chunk_per_cycle() -> eyre::Result<()> {
+    // cycle=P10D, chunk=P10D → max_per_chunk = ceil(10/10) = 1
+    // 2 overdue files → each gets its own chunk date
+    // today = 2026-01-01
+    // file1 chunk: 2026-01-01, file2 chunk: 2026-01-11
+    let output = TestHarness::new()?
+        .init_git(
+            "
+            2001-01-01:
+            +file1.txt
+            2001-01-02:
+            +file2.txt
+            2001-01-03:
+            +file3.txt
+            2001-01-04:
+            +file4.txt
+            2001-01-05:
+            +file5.txt
+            2001-01-06:
+            +file6.txt
+            2001-01-07:
+            +file7.txt
+            2001-01-08:
+            +file8.txt
+            2001-01-09:
+            +file9.txt
+            2001-01-10:
+            +file10.txt
+            2001-01-11:
+            +file11.txt
+            2001-01-12:
+            +file12.txt
+            2001-01-13:
+            +file13.txt
+            2001-01-14:
+            +file14.txt
+            2001-01-15:
+            +file15.txt
+            2001-01-16:
+            +file16.txt
+            2001-01-17:
+            +file17.txt
+            2001-01-18:
+            +file18.txt
+            2001-01-19:
+            +file19.txt
+            2001-01-20:
+            +file20.txt
+            ",
+        )?
+        .run_cli(
+            "2026-01-01T00:00:00+00:00[UTC]",
+            &["schedule", "--cycle", "P30D", "--chunk", "P7D"],
+        )?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stderr, "");
+    insta::assert_snapshot!(output.stdout, @r"
+    2026-01-01:
+    	file1.txt
+    	file2.txt
+    	file3.txt
+    	file4.txt
+    2026-01-08:
+    	file5.txt
+    	file6.txt
+    	file7.txt
+    	file8.txt
+    2026-01-15:
+    	file9.txt
+    	file10.txt
+    	file11.txt
+    	file12.txt
+    2026-01-22:
+    	file13.txt
+    	file14.txt
+    	file15.txt
+    	file16.txt
+    2026-01-29:
+    	file17.txt
+    	file18.txt
+    	file19.txt
+    	file20.txt
     ");
     Ok(())
 }

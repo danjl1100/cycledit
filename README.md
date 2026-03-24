@@ -89,7 +89,7 @@ The command doesn't store any state, yet consecutive invocations yield the same 
 
 ### Edit Schedule
 - The earliest scheduled date is `modified_date + cycle_duration` (see `--cycle DURATION` above)
-- Items are scheduled from the oldest first, such that no more than `ceil(chunk_duration / cycle_duration)` items are present in each chunk.
+- Items are scheduled from the oldest first, such that no more than `ceil(entries_count / ceil(cycle_duration / chunk_duration))` items are present in each chunk.
 	For example:
 	- Suppose all 100 entries were updated today (a diabolical case for scheduling), with a cycle duration of 1 year.
 	- The first entry would be scheduled 1 year from today (cannot schedule before the `modified_date + cycle_duration`), and the remaining chunks would be filled accordingly spanning the next 1 year.
