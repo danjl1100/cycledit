@@ -12,15 +12,22 @@ pub use self::params::ScheduleParams;
 
 /// Schedules the [`FileEntry`]s for the given [`ScheduleParams`]
 ///
+/// When `cycle_end` is `Some`, overdue items are backward-filled: oldest items are
+/// assigned to the furthest available slots so that completing today's items does not
+/// shift items in future slots. When `cycle_end` is `None`, the existing forward-fill
+/// from today is used.
+///
 /// # Errors
 /// Returns an error if the date arithmetic overflows
 pub fn compute_schedule(
     mut entries: Vec<FileEntry>,
     params: ScheduleParams,
     today: Date,
+    cycle_end: Option<Date>,
 ) -> eyre::Result<BTreeMap<Date, Vec<FileEntry>>> {
     let cycle_days = params.get_cycle_days();
     let chunk_days = params.get_chunk_days();
+    let chunk = u32::from(chunk_days.get());
 
     // Sort by (date ASC, blob_hash ASC) for deterministic scheduling.
     entries.sort_by(|a, b| {
@@ -29,13 +36,74 @@ pub fn compute_schedule(
             .then_with(|| a.get_blob_hash().cmp(b.get_blob_hash()))
     });
 
-    // count chunks in 1 cycle
-    let chunks_per_cycle = usize::from(cycle_days.div_ceil(chunk_days).get());
-    // spread chunks equally across chunks
-    let max_per_chunk = entries.len().div_ceil(chunks_per_cycle);
-
     let mut chunk_map: BTreeMap<Date, Vec<FileEntry>> = BTreeMap::new();
 
+    if let Some(cycle_end) = cycle_end {
+        // Path B: backward-fill overdue items, forward-fill future items.
+        let (overdue, future): (Vec<_>, Vec<_>) = entries.into_iter().partition(|e| {
+            e.get_date()
+                .checked_add(jiff::Span::new().days(cycle_days.get()))
+                .map_or(false, |earliest| earliest <= today)
+        });
+
+        // available_slots = ceil(max(1, cycle_end − today) / chunk_days)
+        // Slots are today + k*chunk_days for k = 0 .. available_slots-1 (strictly before cycle_end).
+        let days_to_end = cycle_end
+            .since(today)
+            .wrap_err("subtract overflow (cycle_end)")?
+            .get_days()
+            .max(1) as u32;
+        let available_slots = usize::try_from(days_to_end.div_ceil(chunk))
+            .wrap_err("available_slots overflow")?;
+
+        let overdue_count = overdue.len();
+        let max_per_slot = overdue_count.div_ceil(available_slots.max(1));
+
+        // Backward-fill: oldest items go to the furthest slots; slot 0 (today) gets the rest.
+        let mut overdue_iter = overdue.into_iter();
+        for k in (1..available_slots).rev() {
+            let offset = u32::try_from(k)
+                .wrap_err("slot index overflow")?
+                .checked_mul(chunk)
+                .ok_or_eyre("product overflow")?;
+            let slot_date = today
+                .checked_add(jiff::Span::new().days(offset))
+                .wrap_err("add overflow (slot_date)")?;
+            let slot_entries: Vec<_> = overdue_iter.by_ref().take(max_per_slot).collect();
+            if !slot_entries.is_empty() {
+                chunk_map.insert(slot_date, slot_entries);
+            }
+        }
+        let today_entries: Vec<_> = overdue_iter.collect();
+        if !today_entries.is_empty() {
+            chunk_map.insert(today, today_entries);
+        }
+
+        // Forward-fill future items using their natural grid snap.
+        if !future.is_empty() {
+            let chunks_per_cycle = usize::from(cycle_days.div_ceil(chunk_days).get());
+            let max_per_chunk = future.len().div_ceil(chunks_per_cycle);
+            snap_to_grid(future, today, cycle_days, chunk, max_per_chunk, &mut chunk_map)?;
+        }
+    } else {
+        // Path A: forward-fill from today (existing behaviour).
+        let chunks_per_cycle = usize::from(cycle_days.div_ceil(chunk_days).get());
+        let max_per_chunk = entries.len().div_ceil(chunks_per_cycle);
+        snap_to_grid(entries, today, cycle_days, chunk, max_per_chunk, &mut chunk_map)?;
+    }
+
+    Ok(chunk_map)
+}
+
+/// Snaps each entry to the earliest grid point `today + k*chunk_days` that has room.
+fn snap_to_grid(
+    entries: Vec<FileEntry>,
+    today: Date,
+    cycle_days: NonZeroU16,
+    chunk: u32,
+    max_per_chunk: usize,
+    chunk_map: &mut BTreeMap<Date, Vec<FileEntry>>,
+) -> eyre::Result<()> {
     for entry in entries {
         let earliest = entry
             .get_date()
@@ -51,7 +119,6 @@ pub fn compute_schedule(
                 .get_days(),
         )
         .unwrap_or(0);
-        let chunk = u32::from(chunk_days.get());
 
         let mut k = days_ahead.div_ceil(chunk);
         let mut chunk_date;
@@ -70,8 +137,7 @@ pub fn compute_schedule(
         }
         chunk_map.entry(chunk_date).or_default().push(entry);
     }
-
-    Ok(chunk_map)
+    Ok(())
 }
 
 mod params {

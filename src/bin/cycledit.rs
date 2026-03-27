@@ -155,8 +155,9 @@ fn run() -> eyre::Result<i32> {
             let schedule_params = schedule.parse_span_days(today)?;
 
             let entries = list.list_files(&cwd)?;
-            let schedule = cycledit::schedule::compute_schedule(entries, schedule_params, today)
-                .wrap_err("failed to compute schedule")?;
+            let schedule =
+                cycledit::schedule::compute_schedule(entries, schedule_params, today, None)
+                    .wrap_err("failed to compute schedule")?;
             for (date, files) in &schedule {
                 print_schedule_chunk(*date, files);
             }
@@ -167,8 +168,9 @@ fn run() -> eyre::Result<i32> {
             let schedule_params = schedule.parse_span_days(today)?;
 
             let entries = list.list_files(&cwd)?;
-            let schedule = cycledit::schedule::compute_schedule(entries, schedule_params, today)
-                .wrap_err("failed to compute schedule")?;
+            let schedule =
+                cycledit::schedule::compute_schedule(entries, schedule_params, today, None)
+                    .wrap_err("failed to compute schedule")?;
             for (date, files) in schedule.iter().filter(|(d, _)| **d <= today) {
                 print_schedule_chunk(*date, files);
             }
@@ -181,8 +183,9 @@ fn run() -> eyre::Result<i32> {
             let entries = list.list_files(&cwd)?;
             let total = entries.len();
 
-            let schedule = cycledit::schedule::compute_schedule(entries, schedule_params, today)
-                .wrap_err("failed to compute schedule")?;
+            let schedule =
+                cycledit::schedule::compute_schedule(entries, schedule_params, today, None)
+                    .wrap_err("failed to compute schedule")?;
             let due: usize = schedule
                 .iter()
                 .filter(|(d, _)| **d <= today)
