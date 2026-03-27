@@ -43,7 +43,7 @@ pub fn compute_schedule(
         let (overdue, future): (Vec<_>, Vec<_>) = entries.into_iter().partition(|e| {
             e.get_date()
                 .checked_add(jiff::Span::new().days(cycle_days.get()))
-                .map_or(false, |earliest| earliest <= today)
+                .is_ok_and(|earliest| earliest <= today)
         });
 
         // available_slots = ceil(max(1, cycle_end − today) / chunk_days)
@@ -52,9 +52,10 @@ pub fn compute_schedule(
             .since(today)
             .wrap_err("subtract overflow (cycle_end)")?
             .get_days()
-            .max(1) as u32;
-        let available_slots = usize::try_from(days_to_end.div_ceil(chunk))
-            .wrap_err("available_slots overflow")?;
+            .max(1)
+            .cast_unsigned();
+        let available_slots =
+            usize::try_from(days_to_end.div_ceil(chunk)).wrap_err("available_slots overflow")?;
 
         let overdue_count = overdue.len();
         let max_per_slot = overdue_count.div_ceil(available_slots.max(1));
@@ -83,13 +84,27 @@ pub fn compute_schedule(
         if !future.is_empty() {
             let chunks_per_cycle = usize::from(cycle_days.div_ceil(chunk_days).get());
             let max_per_chunk = future.len().div_ceil(chunks_per_cycle);
-            snap_to_grid(future, today, cycle_days, chunk, max_per_chunk, &mut chunk_map)?;
+            snap_to_grid(
+                future,
+                today,
+                cycle_days,
+                chunk,
+                max_per_chunk,
+                &mut chunk_map,
+            )?;
         }
     } else {
         // Path A: forward-fill from today (existing behaviour).
         let chunks_per_cycle = usize::from(cycle_days.div_ceil(chunk_days).get());
         let max_per_chunk = entries.len().div_ceil(chunks_per_cycle);
-        snap_to_grid(entries, today, cycle_days, chunk, max_per_chunk, &mut chunk_map)?;
+        snap_to_grid(
+            entries,
+            today,
+            cycle_days,
+            chunk,
+            max_per_chunk,
+            &mut chunk_map,
+        )?;
     }
 
     Ok(chunk_map)

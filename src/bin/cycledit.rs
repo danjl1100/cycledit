@@ -156,15 +156,14 @@ fn read_cycle_end(
     };
 
     // Parse `cycle_start = YYYY-MM-DD`
-    let cycle_start: Date = match contents.lines().find_map(|line| {
+    let cycle_start: Date = if let Some(Ok(date)) = contents.lines().find_map(|line| {
         let val = line.trim().strip_prefix("cycle_start =")?;
         Some(val.trim().parse::<Date>())
     }) {
-        Some(Ok(date)) => date,
-        _ => {
-            eprintln!("hint: .cycledit is malformed; run `cycledit init` to set a new one");
-            return Ok(None);
-        }
+        date
+    } else {
+        eprintln!("hint: .cycledit is malformed; run `cycledit init` to set a new one");
+        return Ok(None);
     };
 
     let cycle_end = cycle_start
@@ -222,10 +221,10 @@ fn run() -> eyre::Result<i32> {
                     .filter(|e| {
                         e.get_date()
                             .checked_add(jiff::Span::new().days(cycle_days.get()))
-                            .map_or(false, |earliest| earliest <= today)
+                            .is_ok_and(|earliest| earliest <= today)
                     })
                     .count();
-                if overdue * 2 > total {
+                if overdue > total / 2 {
                     eprintln!(
                         "hint: {overdue} of {total} files due today; run `cycledit init` to stabilize the schedule"
                     );
