@@ -89,15 +89,17 @@ to `compute_schedule` (or a new library entry point).  Two code paths:
 Used when `.cycledit` is absent or `cycle_start + cycle_days <= today` (expired).
 
 - Forward-fill from today, same as today.
-- **Hint**: if more than half of all tracked items are overdue, print to stderr:
+- **Hint**: if more than half of all tracked items are overdue **and there are at
+  least two overdue items** (a single-file repo does not benefit from the hint),
+  print to stderr:
   ```
   hint: N of M files due today; run `cycledit init` to stabilize the schedule
   ```
   Output is still written to stdout normally.
 - If the cycle has expired (file present but `cycle_start + cycle_days <= today`),
-  also warn:
+  also warn (including the derived `cycle_end` date for context):
   ```
-  hint: cycle anchor expired (started 2026-01-01); run `cycledit init` to set a new one
+  hint: cycle anchor expired (started 2026-01-01, ended 2026-12-31); run `cycledit init` to set a new one
   ```
 
 #### Path B — anchor present (`cycle_end` supplied by the binary)
