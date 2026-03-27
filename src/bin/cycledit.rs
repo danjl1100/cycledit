@@ -172,7 +172,7 @@ fn read_cycle_end(
 
     if cycle_end <= today {
         eprintln!(
-            "hint: cycle anchor expired (started {cycle_start}); run `cycledit init` to set a new one"
+            "hint: cycle anchor expired (started {cycle_start}, ended {cycle_end}); run `cycledit init` to set a new one"
         );
         return Ok(None);
     }
