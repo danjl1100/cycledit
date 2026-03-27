@@ -103,7 +103,7 @@ fn schedule_all_overdue_lands_in_today() -> eyre::Result<()> {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule"])?;
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    insta::assert_snapshot!(output.stderr, @"hint: 3 of 3 files due today; run `cycledit init` to stabilize the schedule");
     insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
     	file2.txt
@@ -186,7 +186,7 @@ fn schedule_same_date_deterministic_order() -> eyre::Result<()> {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule"])?;
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    insta::assert_snapshot!(output.stderr, @"hint: 2 of 2 files due today; run `cycledit init` to stabilize the schedule");
     insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
     	zzz.txt
@@ -258,7 +258,7 @@ fn schedule_chunk_alignment_short_chunk() -> eyre::Result<()> {
         )?;
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    insta::assert_snapshot!(output.stderr, @"hint: 2 of 3 files due today; run `cycledit init` to stabilize the schedule");
     insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
     	file_a.txt
@@ -291,7 +291,7 @@ fn schedule_degenerate_single_chunk() -> eyre::Result<()> {
         )?;
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    insta::assert_snapshot!(output.stderr, @"hint: 2 of 2 files due today; run `cycledit init` to stabilize the schedule");
     insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
     	file2.txt
@@ -358,7 +358,7 @@ fn schedule_fills_chunk_per_cycle() -> eyre::Result<()> {
         )?;
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    insta::assert_snapshot!(output.stderr, @"hint: 20 of 20 files due today; run `cycledit init` to stabilize the schedule");
     insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
     	file1.txt

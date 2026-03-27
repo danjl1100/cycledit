@@ -22,6 +22,7 @@ fn schedule_no_anchor_hint_when_majority_overdue() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    insta::assert_snapshot!(output.stderr, @"hint: 3 of 4 files due today; run `cycledit init` to stabilize the schedule");
     insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
     	file1.txt
@@ -49,9 +50,14 @@ fn init_writes_cycle_start() -> eyre::Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.contains("2026-01-01"), "{}", output.stdout);
+    insta::assert_snapshot!(output.stdout, @"Cycle anchor set: started 2026-01-01");
 
     let contents = std::fs::read_to_string(harness.git_root().join(".cycledit"))?;
     assert!(contents.contains("cycle_start = 2026-01-01"), "{contents}");
+    insta::assert_snapshot!(contents, @r"
+    # cycledit cycle anchor — run `cycledit init` to reset
+    cycle_start = 2026-01-01
+    ");
     Ok(())
 }
 
@@ -151,6 +157,10 @@ fn schedule_expired_anchor_falls_back_with_warning() -> eyre::Result<()> {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.contains("expired"), "{}", output.stderr);
     assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    insta::assert_snapshot!(output.stderr, @r"
+    hint: cycle anchor expired (started 2020-01-01, ended 2020-12-31); run `cycledit init` to set a new one
+    hint: 1 of 1 files due today; run `cycledit init` to stabilize the schedule
+    ");
     assert!(!output.stdout.is_empty());
     Ok(())
 }
@@ -175,5 +185,9 @@ fn init_overwrites_existing_anchor() -> eyre::Result<()> {
 
     let contents = std::fs::read_to_string(harness.git_root().join(".cycledit"))?;
     assert!(contents.contains("cycle_start = 2026-01-01"), "{contents}");
+    insta::assert_snapshot!(contents, @r"
+    # cycledit cycle anchor — run `cycledit init` to reset
+    cycle_start = 2026-01-01
+    ");
     Ok(())
 }
