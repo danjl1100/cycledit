@@ -159,7 +159,6 @@ fn schedule_expired_anchor_falls_back_with_warning() -> eyre::Result<()> {
     assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
     insta::assert_snapshot!(output.stderr, @r"
     hint: cycle anchor expired (started 2020-01-01, ended 2020-12-31); run `cycledit init` to set a new one
-    hint: 1 of 1 files due today; run `cycledit init` to stabilize the schedule
     ");
     assert!(!output.stdout.is_empty());
     Ok(())

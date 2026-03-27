@@ -224,7 +224,7 @@ fn run() -> eyre::Result<i32> {
                             .is_ok_and(|earliest| earliest <= today)
                     })
                     .count();
-                if overdue > total / 2 {
+                if overdue > total / 2 && overdue > 1 {
                     eprintln!(
                         "hint: {overdue} of {total} files due today; run `cycledit init` to stabilize the schedule"
                     );
