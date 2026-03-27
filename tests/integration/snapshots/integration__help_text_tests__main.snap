@@ -5,6 +5,7 @@ expression: stdout
 Usage: cycledit <COMMAND>
 
 Commands:
+  init      Set a new cycle anchor (writes `.cycledit` in the repo root)
   list      List files with their last-modified date
   schedule  Show the full edit schedule
   now       Show only files due now (`chunk_date <= today`)
