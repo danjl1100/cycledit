@@ -106,11 +106,12 @@ Used when `.cycledit` is absent or `cycle_start + cycle_days <= today` (expired)
    - *Overdue*: `earliest_date <= today`  (`earliest_date = git_date + cycle_days`)
    - *Future*: `earliest_date > today` — unchanged, snapped to grid as before
 
-2. **Compute available slots** for overdue items:
+2. **Compute available slots** for overdue items (slots that start strictly before
+   `cycle_end`, always at least 1 so the expired-anchor edge case has a home):
    ```
-   available_slots = floor((cycle_end - today) / chunk_days) + 1
+   available_slots = ceil(max(1, cycle_end − today) / chunk_days)
    ```
-   Slots are `today`, `today + chunk_days`, …, up to `cycle_end`.
+   Slots are `today`, `today + chunk_days`, …, the last one strictly before `cycle_end`.
 
 3. **Compute max per slot** from the overdue pool:
    ```
