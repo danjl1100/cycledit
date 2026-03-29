@@ -4,9 +4,8 @@ use crate::common::TestHarness;
 #[test]
 fn schedule_no_anchor_hint_when_majority_overdue() -> eyre::Result<()> {
     // 3 overdue, 1 future → 3/4 > 50% → hint expected
-    let output = TestHarness::new()?
-        .init_git(
-            "
+    let harness = TestHarness::new()?.init_git(
+        "
             2001-01-01:
             +file1.txt
             2001-01-02:
@@ -17,11 +16,17 @@ fn schedule_no_anchor_hint_when_majority_overdue() -> eyre::Result<()> {
             2025-12-31:
             +file4.txt
         ",
-        )?
-        .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule"])?;
+    )?;
+
+    // subcommand - schedule
+    let output = harness.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["schedule"])?;
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    assert!(
+        output.stderr.contains("cycledit init"),
+        "stderr: {:?}",
+        output.stderr
+    );
     insta::assert_snapshot!(output.stderr, @"hint: 3 of 4 files due today; run `cycledit init` to stabilize the schedule");
     insta::assert_snapshot!(output.stdout, @r"
     2026-01-01:
@@ -33,6 +38,34 @@ fn schedule_no_anchor_hint_when_majority_overdue() -> eyre::Result<()> {
     2026-12-31:
     	file4.txt
     ");
+
+    // subcommand - now
+    let output = harness.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["now"])?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(
+        output.stderr.contains("cycledit init"),
+        "stderr: {:?}",
+        output.stderr
+    );
+    insta::assert_snapshot!(output.stderr, @"hint: 3 of 4 files due today; run `cycledit init` to stabilize the schedule");
+    insta::assert_snapshot!(output.stdout, @r"
+    2026-01-01:
+    	file1.txt
+    ");
+
+    // subcommand - check
+    let output = harness.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["check"])?;
+
+    assert_eq!(output.status.code(), Some(100));
+    assert!(
+        output.stderr.contains("cycledit init"),
+        "stderr: {:?}",
+        output.stderr
+    );
+    insta::assert_snapshot!(output.stderr, @"hint: 3 of 4 files due today; run `cycledit init` to stabilize the schedule");
+    insta::assert_snapshot!(output.stdout, @"WARN: Need to update 1 file(s) now (of 4 files total)");
+
     Ok(())
 }
 
@@ -157,10 +190,25 @@ fn schedule_expired_anchor_falls_back_with_warning() -> eyre::Result<()> {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.contains("expired"), "{}", output.stderr);
     assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
-    insta::assert_snapshot!(output.stderr, @r"
-    hint: cycle anchor expired (started 2020-01-01, ended 2020-12-31); run `cycledit init` to set a new one
-    ");
+    insta::assert_snapshot!(output.stderr, @"hint: cycle anchor expired (started 2020-01-01, ended 2020-12-31); run `cycledit init` to set a new one");
     assert!(!output.stdout.is_empty());
+
+    let output = harness.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["now"])?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.contains("expired"), "{}", output.stderr);
+    assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    insta::assert_snapshot!(output.stderr, @"hint: cycle anchor expired (started 2020-01-01, ended 2020-12-31); run `cycledit init` to set a new one");
+    assert!(!output.stdout.is_empty());
+
+    let output = harness.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["check"])?;
+
+    assert_eq!(output.status.code(), Some(100));
+    assert!(output.stderr.contains("expired"), "{}", output.stderr);
+    assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
+    insta::assert_snapshot!(output.stderr, @"hint: cycle anchor expired (started 2020-01-01, ended 2020-12-31); run `cycledit init` to set a new one");
+    assert!(!output.stdout.is_empty());
+
     Ok(())
 }
 

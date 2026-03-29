@@ -1,7 +1,10 @@
 //! `cycledit` CLI binary.
 
 use clap::{Args, Parser, Subcommand};
-use cycledit::{git, schedule::ScheduleParams};
+use cycledit::{
+    git::{self, FileEntry},
+    schedule::ScheduleParams,
+};
 use eyre::WrapErr;
 use jiff::civil::Date;
 use std::num::NonZeroU16;
@@ -180,6 +183,32 @@ fn read_cycle_end(
     Ok(Some(cycle_end))
 }
 
+// Prints a hint: >50% of all items are overdue and no anchor is active.
+fn print_init_hint(
+    entries: &[FileEntry],
+    today: Date,
+    cycle_end: Option<Date>,
+    cycle_days: NonZeroU16,
+) {
+    if cycle_end.is_none() {
+        let total = entries.len();
+
+        let overdue = entries
+            .iter()
+            .filter(|e| {
+                e.get_date()
+                    .checked_add(jiff::Span::new().days(cycle_days.get()))
+                    .is_ok_and(|earliest| earliest <= today)
+            })
+            .count();
+        if overdue > total / 2 && overdue > 1 {
+            eprintln!(
+                "hint: {overdue} of {total} files due today; run `cycledit init` to stabilize the schedule"
+            );
+        }
+    }
+}
+
 fn run() -> eyre::Result<i32> {
     let cli = Cli::parse();
     let cwd = std::env::current_dir()?;
@@ -212,24 +241,7 @@ fn run() -> eyre::Result<i32> {
             let cycle_end = read_cycle_end(&git_root, cycle_days, today)?;
 
             let entries = list.list_files(&cwd)?;
-            let total = entries.len();
-
-            // Path A hint: >50% of all items are overdue and no anchor is active.
-            if cycle_end.is_none() {
-                let overdue = entries
-                    .iter()
-                    .filter(|e| {
-                        e.get_date()
-                            .checked_add(jiff::Span::new().days(cycle_days.get()))
-                            .is_ok_and(|earliest| earliest <= today)
-                    })
-                    .count();
-                if overdue > total / 2 && overdue > 1 {
-                    eprintln!(
-                        "hint: {overdue} of {total} files due today; run `cycledit init` to stabilize the schedule"
-                    );
-                }
-            }
+            print_init_hint(&entries, today, cycle_end, cycle_days);
 
             let schedule =
                 cycledit::schedule::compute_schedule(entries, schedule_params, today, cycle_end)
@@ -248,6 +260,8 @@ fn run() -> eyre::Result<i32> {
             let cycle_end = read_cycle_end(&git_root, cycle_days, today)?;
 
             let entries = list.list_files(&cwd)?;
+            print_init_hint(&entries, today, cycle_end, cycle_days);
+
             let schedule =
                 cycledit::schedule::compute_schedule(entries, schedule_params, today, cycle_end)
                     .wrap_err("failed to compute schedule")?;
@@ -265,6 +279,7 @@ fn run() -> eyre::Result<i32> {
             let cycle_end = read_cycle_end(&git_root, cycle_days, today)?;
 
             let entries = list.list_files(&cwd)?;
+            print_init_hint(&entries, today, cycle_end, cycle_days);
             let total = entries.len();
 
             let schedule =

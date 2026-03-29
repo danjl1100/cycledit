@@ -62,7 +62,7 @@ fn check_warn_when_files_due() -> eyre::Result<()> {
         .run_cli("2026-01-01T00:00:00+00:00[UTC]", &["check"])?;
 
     assert_eq!(output.status.code(), Some(100));
-    assert_eq!(output.stderr, "");
+    insta::assert_snapshot!(output.stderr, @"hint: 3 of 3 files due today; run `cycledit init` to stabilize the schedule");
     // ceil(7/365) = 1 per chunk; only the first chunk falls on today (1 of 3 files)
     insta::assert_snapshot!(output.stdout, @"WARN: Need to update 1 file(s) now (of 3 files total)");
     Ok(())
