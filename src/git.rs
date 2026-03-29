@@ -74,6 +74,18 @@ impl FileEntry {
     }
 }
 
+/// Returns the root directory of the git working tree that contains `directory`.
+///
+/// # Errors
+/// Returns an error if `directory` is not inside a git working tree.
+pub fn find_git_root(directory: &std::path::Path) -> eyre::Result<std::path::PathBuf> {
+    let repo = gix::discover(directory).wrap_err("failed to discover git repository")?;
+    let work_dir = repo
+        .work_dir()
+        .ok_or_else(|| eyre::eyre!("repository has no working tree (bare?)"))?;
+    Ok(work_dir.to_path_buf())
+}
+
 /// List files tracked in the git index, with the date of the most recent commit
 /// that modified each file. Entries are sorted lexicographically by path.
 ///

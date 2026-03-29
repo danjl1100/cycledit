@@ -80,6 +80,20 @@ impl TestHarness {
 
         result.map(|()| self)
     }
+
+    /// Returns the root directory of the temporary git repository.
+    pub fn git_root(&self) -> &std::path::Path {
+        self.dir.path()
+    }
+
+    /// Apply additional fixture blocks to an existing repo (no `git init`).
+    pub fn apply_git(self, state: &str) -> eyre::Result<Self> {
+        let blocks = GitOpsBlocks::from_str(state).wrap_err_with(|| {
+            format!("invalid input for apply_git:\n--------\n{state}\n---END---")
+        })?;
+        Self::apply_blocks_io(&blocks, self.dir.path()).wrap_err("apply_git I/O failed")?;
+        Ok(self)
+    }
 }
 impl<'a> GitOpsBlocks<'a> {
     fn from_str(state: &'a str) -> eyre::Result<Self> {
@@ -180,7 +194,7 @@ impl BlocksIter for &GitOpsBlocks<'_> {
 }
 
 impl TestHarness {
-    fn init_git_io(blocks: impl BlocksIter, dir: &std::path::Path) -> eyre::Result<()> {
+    fn apply_blocks_io(blocks: impl BlocksIter, dir: &std::path::Path) -> eyre::Result<()> {
         struct Visitor<'a> {
             dir: &'a std::path::Path,
         }
@@ -258,13 +272,16 @@ impl TestHarness {
             }
         }
 
-        run_git(dir, &["init", "-b", "main"])?;
-        run_git(dir, &["config", "user.email", "test@example.com"])?;
-        run_git(dir, &["config", "user.name", "Test"])?;
-
         blocks.visit_all(Visitor { dir })?;
 
         Ok(())
+    }
+
+    fn init_git_io(blocks: impl BlocksIter, dir: &std::path::Path) -> eyre::Result<()> {
+        run_git(dir, &["init", "-b", "main"])?;
+        run_git(dir, &["config", "user.email", "test@example.com"])?;
+        run_git(dir, &["config", "user.name", "Test"])?;
+        Self::apply_blocks_io(blocks, dir)
     }
 
     pub fn dump_fixture(&self) -> eyre::Result<String> {

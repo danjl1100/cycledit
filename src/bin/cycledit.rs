@@ -1,8 +1,12 @@
 //! `cycledit` CLI binary.
 
 use clap::{Args, Parser, Subcommand};
-use cycledit::{git, schedule::ScheduleParams};
+use cycledit::{
+    git::{self, FileEntry},
+    schedule::ScheduleParams,
+};
 use eyre::WrapErr;
+use jiff::civil::Date;
 use std::num::NonZeroU16;
 
 #[derive(Parser)]
@@ -35,6 +39,8 @@ struct ScheduleArgs {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Set a new cycle anchor (writes `.cycledit` in the repo root)
+    Init,
     /// List files with their last-modified date
     List {
         #[clap(flatten)]
@@ -138,11 +144,87 @@ fn print_schedule_chunk(date: jiff::civil::Date, files: &[git::FileEntry]) {
     }
 }
 
+/// Reads `.cycledit` from `git_root` and returns a valid `cycle_end`, or `None` on
+/// Path A (absent / expired / malformed). Warnings are printed to stderr.
+fn read_cycle_end(
+    git_root: &std::path::Path,
+    cycle_days: NonZeroU16,
+    today: Date,
+) -> eyre::Result<Option<Date>> {
+    let path = git_root.join(".cycledit");
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(eyre::eyre!(e).wrap_err("failed to read .cycledit")),
+    };
+
+    // Parse `cycle_start = YYYY-MM-DD`
+    let cycle_start: Date = if let Some(Ok(date)) = contents.lines().find_map(|line| {
+        let val = line.trim().strip_prefix("cycle_start =")?;
+        Some(val.trim().parse::<Date>())
+    }) {
+        date
+    } else {
+        eprintln!("hint: .cycledit is malformed; run `cycledit init` to set a new one");
+        return Ok(None);
+    };
+
+    let cycle_end = cycle_start
+        .checked_add(jiff::Span::new().days(cycle_days.get()))
+        .wrap_err("cycle_end overflow")?;
+
+    if cycle_end <= today {
+        eprintln!(
+            "hint: cycle anchor expired (started {cycle_start}, ended {cycle_end}); run `cycledit init` to set a new one"
+        );
+        return Ok(None);
+    }
+
+    Ok(Some(cycle_end))
+}
+
+// Prints a hint: >50% of all items are overdue and no anchor is active.
+fn print_init_hint(
+    entries: &[FileEntry],
+    today: Date,
+    cycle_end: Option<Date>,
+    cycle_days: NonZeroU16,
+) {
+    if cycle_end.is_none() {
+        let total = entries.len();
+
+        let overdue = entries
+            .iter()
+            .filter(|e| {
+                e.get_date()
+                    .checked_add(jiff::Span::new().days(cycle_days.get()))
+                    .is_ok_and(|earliest| earliest <= today)
+            })
+            .count();
+        if overdue > total / 2 && overdue > 1 {
+            eprintln!(
+                "hint: {overdue} of {total} files due today; run `cycledit init` to stabilize the schedule"
+            );
+        }
+    }
+}
+
 fn run() -> eyre::Result<i32> {
     let cli = Cli::parse();
     let cwd = std::env::current_dir()?;
 
     match cli.command {
+        Commands::Init => {
+            let today = today()?;
+            let git_root = git::find_git_root(&cwd)?;
+            let path = git_root.join(".cycledit");
+            let contents = format!(
+                "# cycledit cycle anchor — run `cycledit init` to reset\ncycle_start = {today}\n"
+            );
+            std::fs::write(&path, contents).wrap_err("failed to write .cycledit")?;
+            println!("Cycle anchor set: started {today}");
+        }
+
         Commands::List { list } => {
             let entries = list.list_files(&cwd)?;
             for entry in &entries {
@@ -153,10 +235,17 @@ fn run() -> eyre::Result<i32> {
         Commands::Schedule { list, schedule } => {
             let today = today()?;
             let schedule_params = schedule.parse_span_days(today)?;
+            let cycle_days = schedule_params.get_cycle_days();
+
+            let git_root = git::find_git_root(&cwd)?;
+            let cycle_end = read_cycle_end(&git_root, cycle_days, today)?;
 
             let entries = list.list_files(&cwd)?;
-            let schedule = cycledit::schedule::compute_schedule(entries, schedule_params, today)
-                .wrap_err("failed to compute schedule")?;
+            print_init_hint(&entries, today, cycle_end, cycle_days);
+
+            let schedule =
+                cycledit::schedule::compute_schedule(entries, schedule_params, today, cycle_end)
+                    .wrap_err("failed to compute schedule")?;
             for (date, files) in &schedule {
                 print_schedule_chunk(*date, files);
             }
@@ -165,10 +254,17 @@ fn run() -> eyre::Result<i32> {
         Commands::Now { list, schedule } => {
             let today = today()?;
             let schedule_params = schedule.parse_span_days(today)?;
+            let cycle_days = schedule_params.get_cycle_days();
+
+            let git_root = git::find_git_root(&cwd)?;
+            let cycle_end = read_cycle_end(&git_root, cycle_days, today)?;
 
             let entries = list.list_files(&cwd)?;
-            let schedule = cycledit::schedule::compute_schedule(entries, schedule_params, today)
-                .wrap_err("failed to compute schedule")?;
+            print_init_hint(&entries, today, cycle_end, cycle_days);
+
+            let schedule =
+                cycledit::schedule::compute_schedule(entries, schedule_params, today, cycle_end)
+                    .wrap_err("failed to compute schedule")?;
             for (date, files) in schedule.iter().filter(|(d, _)| **d <= today) {
                 print_schedule_chunk(*date, files);
             }
@@ -177,12 +273,18 @@ fn run() -> eyre::Result<i32> {
         Commands::Check { list, schedule } => {
             let today = today()?;
             let schedule_params = schedule.parse_span_days(today)?;
+            let cycle_days = schedule_params.get_cycle_days();
+
+            let git_root = git::find_git_root(&cwd)?;
+            let cycle_end = read_cycle_end(&git_root, cycle_days, today)?;
 
             let entries = list.list_files(&cwd)?;
+            print_init_hint(&entries, today, cycle_end, cycle_days);
             let total = entries.len();
 
-            let schedule = cycledit::schedule::compute_schedule(entries, schedule_params, today)
-                .wrap_err("failed to compute schedule")?;
+            let schedule =
+                cycledit::schedule::compute_schedule(entries, schedule_params, today, cycle_end)
+                    .wrap_err("failed to compute schedule")?;
             let due: usize = schedule
                 .iter()
                 .filter(|(d, _)| **d <= today)
