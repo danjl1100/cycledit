@@ -111,7 +111,10 @@ fn list_error_not_in_git_repo() -> eyre::Result<()> {
     assert_eq!(output.status.code(), Some(1));
     // Filter the temp path which varies per run.
     insta::with_settings!({
-        filters => vec![(r"'/[^']+'", "'[PATH]'")]
+        filters => vec![
+            (r"'/[^']+'", "'[PATH]'"),
+            (r"parents( within device limits below '[^']+')?", "'[PARENTS]'"),
+        ]
     }, {
         insta::assert_snapshot!(output.stderr);
     });
