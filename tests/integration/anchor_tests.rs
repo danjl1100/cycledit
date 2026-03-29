@@ -118,7 +118,7 @@ fn schedule_anchor_stable_after_completing_today() -> eyre::Result<()> {
     )?;
 
     // Future chunks (file1–4) are unchanged; today's slot is empty; file5 is now a
-    // future item due at cycle_end (2026-02-05 = 2026-01-01 + 35d).
+    // future item snapped to cycle_end (2026-02-05 = 2026-01-01 + 35d).
     let out2 = harness.run_cli(today, &["schedule", "--cycle", "P35D"])?;
     assert_eq!(out2.status.code(), Some(0));
     assert_eq!(out2.stderr, "");

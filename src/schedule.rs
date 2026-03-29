@@ -2,7 +2,7 @@
 
 use std::{
     collections::BTreeMap,
-    num::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroUsize},
+    num::{NonZeroU16, NonZeroU32, NonZeroUsize},
 };
 
 use jiff::civil::Date;
@@ -12,11 +12,6 @@ use crate::git::FileEntry;
 use eyre::{Context as _, OptionExt as _};
 
 pub use self::params::ScheduleParams;
-
-const ONE: NonZeroU8 = match NonZeroU8::new(1) {
-    Some(v) => v,
-    None => panic!("nonzero"),
-};
 
 type ChunkMap = BTreeMap<Date, Vec<FileEntry>>;
 
@@ -61,16 +56,16 @@ pub fn compute_schedule(
             let days_to_end = NonZeroU32::new(
                 cycle_end
                     .since(today)
-                    .wrap_err("subtract overflow (cycle_end)")?
+                    .wrap_err("subtract overflow (cycle_end - today)")?
                     .get_days()
                     .cast_unsigned(),
             )
-            .unwrap_or(ONE.into());
+            .unwrap_or(NonZeroU32::MIN);
             let available_slots = days_to_end.div_ceil(chunk_days.into());
 
             let max_per_slot = {
                 let available_slots = NonZeroUsize::try_from(available_slots)
-                    .wrap_err("division overflow (available_slots)")?;
+                    .wrap_err("available_slots out of range")?;
                 overdue_count.div_ceil(available_slots)
             };
 
