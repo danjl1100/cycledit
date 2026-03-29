@@ -313,9 +313,7 @@ impl TestHarness {
             .current_dir(self.dir.path())
             .env_clear()
             .env("TZ", "UTC")
-            .env("CURRENT_TIME_ZONED", time)
-            .env("PATH", std::env::var("PATH").unwrap_or_default())
-            .env("HOME", std::env::var("HOME").unwrap_or_default());
+            .env("CURRENT_TIME_ZONED", time);
         if self.metrics {
             cmd.env("CYCLEDIT_LOG_METRICS", "1");
         }

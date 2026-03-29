@@ -133,7 +133,7 @@ pub fn list_files(
     // Step 2: Track files that still need a date; exit early once all are dated.
     let mut remaining: HashSet<String> = head_filtered.keys().cloned().collect();
     // BTreeMap keeps entries sorted by path, so no explicit sort is needed at the end.
-    let mut file_dates: BTreeMap<String, (Date, ObjectId)> = BTreeMap::new();
+    let mut file_dates = FileDates::new();
 
     // Date HEAD's changes against its parent.
     let head_parent_id = {
@@ -146,11 +146,10 @@ pub fn list_files(
             .wrap_err("parse HEAD parent id")?
     };
     let head_parent = walk_parent_blobs(&repo, head_parent_id, &remaining)?;
-    apply_diff(
+    file_dates.apply_diff(
         &head_filtered,
         head_parent.as_ref().map(|p| &p.blobs),
         head_date,
-        &mut file_dates,
         &mut remaining,
     );
 
@@ -207,11 +206,10 @@ pub fn list_files(
                 .wrap_err("parse parent id")?
         };
         let parent = walk_parent_blobs(&repo, parent_id, &remaining)?;
-        apply_diff(
+        file_dates.apply_diff(
             &current_subset,
             parent.as_ref().map(|p| &p.blobs),
             date,
-            &mut file_dates,
             &mut remaining,
         );
 
@@ -219,14 +217,7 @@ pub fn list_files(
         cached_tree = parent;
     }
 
-    let entries: Vec<FileEntry> = file_dates
-        .into_iter()
-        .map(|(path, (date, blob_hash))| FileEntry {
-            date,
-            blob_hash,
-            path: PathBuf::from(path),
-        })
-        .collect();
+    let entries: Vec<FileEntry> = file_dates.into_iter().collect();
 
     let is_log_metrics = std::env::var("CYCLEDIT_LOG_METRICS").as_deref() == Ok("1");
     if is_log_metrics {
@@ -275,20 +266,42 @@ fn walk_parent_blobs(
     }))
 }
 
-/// For each path in `current` whose blob differs from `parent`, record `date` in
-/// `file_dates` and remove the path from `remaining`.
-fn apply_diff(
-    current: &HashMap<String, ObjectId>,
-    parent: Option<&HashMap<String, ObjectId>>,
-    date: Date,
-    file_dates: &mut BTreeMap<String, (Date, ObjectId)>,
-    remaining: &mut HashSet<String>,
-) {
-    for (path, blob_hash) in current {
-        if parent.and_then(|p| p.get(path)) != Some(blob_hash) {
-            file_dates.insert(path.clone(), (date, *blob_hash));
-            remaining.remove(path);
+struct FileDates {
+    file_dates: BTreeMap<String, (Date, ObjectId)>,
+}
+impl FileDates {
+    fn new() -> Self {
+        Self {
+            file_dates: BTreeMap::new(),
         }
+    }
+
+    /// For each path in `current` whose blob differs from `parent`, record `date` in
+    /// `file_dates` and remove the path from `remaining`.
+    fn apply_diff(
+        &mut self,
+        current: &HashMap<String, ObjectId>,
+        parent: Option<&HashMap<String, ObjectId>>,
+        date: Date,
+        remaining: &mut HashSet<String>,
+    ) {
+        for (path, blob_hash) in current {
+            if parent.and_then(|p| p.get(path)) != Some(blob_hash) {
+                self.file_dates.insert(path.clone(), (date, *blob_hash));
+                remaining.remove(path);
+            }
+        }
+    }
+
+    fn into_iter(self) -> impl Iterator<Item = FileEntry> {
+        let Self { file_dates } = self;
+        file_dates
+            .into_iter()
+            .map(|(path, (date, blob_hash))| FileEntry {
+                date,
+                blob_hash,
+                path: PathBuf::from(path),
+            })
     }
 }
 
