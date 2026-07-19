@@ -339,7 +339,7 @@ fn run_git_env(dir: &std::path::Path, args: &[&str], env: &[(&str, &str)]) -> ey
     }
     let output = cmd
         .output()
-        .wrap_err("failed to run git {args:?} in {dir:?}")?;
+        .wrap_err_with(|| format!("failed to run git {args:?} in {dir:?}", dir = dir.display()))?;
     print!("{}", String::from_utf8_lossy(&output.stdout));
     eprint!("{}", String::from_utf8_lossy(&output.stderr));
     if output.status.success() {
