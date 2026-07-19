@@ -199,7 +199,7 @@ impl BlocksIter for &DatedBlocks<'_> {
                 }
             }
             for &(op, regular_path) in regular_paths {
-                #[expect(clippy::panic)]
+                #[expect(clippy::panic, reason = "error details inside generic (fmt) method")]
                 let Some(op) = op.with_path(regular_path) else {
                     panic!("invalid regular_path, must have filename: {regular_path}")
                 };
