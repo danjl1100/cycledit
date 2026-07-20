@@ -307,6 +307,8 @@ impl TestHarness {
 
     /// Run the cycledit binary with `TZ=UTC`, `CURRENT_TIME_ZONED=<time>`, and the given args.
     pub fn run_cli(&self, time: &str, args: &[&str]) -> eyre::Result<CommandOutput> {
+        const TZDIR: &str = "TZDIR";
+
         let binary = env!("CARGO_BIN_EXE_cycledit");
         let mut cmd = Command::new(binary);
         cmd.args(args)
@@ -314,6 +316,13 @@ impl TestHarness {
             .env_clear()
             .env("TZ", "UTC")
             .env("CURRENT_TIME_ZONED", time);
+
+        // allow the test runner to specify a custom TZDIR,
+        // in case common paths are not available
+        if let Ok(timezone_dir) = std::env::var(TZDIR) {
+            cmd.env(TZDIR, timezone_dir);
+        }
+
         if self.metrics {
             cmd.env("CYCLEDIT_LOG_METRICS", "1");
         }
