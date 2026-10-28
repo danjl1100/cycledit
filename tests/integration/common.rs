@@ -151,7 +151,9 @@ impl<'a> GitOpsBlocks<'a> {
             // push additional operation
             match self.push_op_to_last_date(op) {
                 Ok(()) => Ok(()),
-                Err(()) => eyre::bail!("file entry before date header"),
+                Err(()) => {
+                    eyre::bail!("file entry before date header");
+                }
             }
         }
     }
@@ -354,6 +356,6 @@ fn run_git_env(dir: &std::path::Path, args: &[&str], env: &[(&str, &str)]) -> ey
     if output.status.success() {
         Ok(())
     } else {
-        eyre::bail!("git {args:?} failed in {dir:?}: {:?}", output.status)
+        eyre::bail!("git {args:?} failed in {dir:?}: {:?}", output.status);
     }
 }

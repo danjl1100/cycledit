@@ -5,6 +5,9 @@ const ARB_FIXTURE: &str = "
 +file1.txt
 ";
 
+// Filter the "Caused by:" chain to ignore number parse error message changes from the standard library
+const FILTER_CAUSE_CHAIN_1: (&str, &str) = (r"1: .*", "[CAUSE-1]");
+
 #[test]
 fn schedule_error_zero_cycle() -> eyre::Result<()> {
     let output = TestHarness::new()?.init_git(ARB_FIXTURE)?.run_cli(
@@ -24,7 +27,9 @@ fn schedule_error_negative_cycle() -> eyre::Result<()> {
     )?;
 
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    insta::assert_snapshot!(output.stderr);
+    insta::with_settings!({filters => vec![FILTER_CAUSE_CHAIN_1]}, {
+        insta::assert_snapshot!(output.stderr);
+    });
     Ok(())
 }
 #[test]
@@ -35,7 +40,9 @@ fn schedule_error_large_cycle() -> eyre::Result<()> {
     )?;
 
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    insta::assert_snapshot!(output.stderr);
+    insta::with_settings!({filters => vec![FILTER_CAUSE_CHAIN_1]}, {
+        insta::assert_snapshot!(output.stderr);
+    });
     Ok(())
 }
 

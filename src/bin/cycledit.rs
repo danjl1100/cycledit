@@ -96,7 +96,7 @@ fn parse_span_days(s: &str, ref_date: jiff::civil::Date) -> eyre::Result<NonZero
     let days = u16::try_from(days)
         .wrap_err_with(|| range_err("duration too large (u16::MAX = 65535 days)"))?;
     let Some(days) = NonZeroU16::new(days) else {
-        eyre::bail!(range_err("zero duration"))
+        eyre::bail!(range_err("zero duration"));
     };
 
     Ok(days)

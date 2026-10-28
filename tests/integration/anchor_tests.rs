@@ -191,7 +191,7 @@ fn schedule_expired_anchor_falls_back_with_warning() -> eyre::Result<()> {
     assert!(output.stderr.contains("expired"), "{}", output.stderr);
     assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
     insta::assert_snapshot!(output.stderr, @"hint: cycle anchor expired (started 2020-01-01, ended 2020-12-31); run `cycledit init` to set a new one");
-    assert!(!output.stdout.is_empty());
+    assert_ne!(output.stdout, "");
 
     let output = harness.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["now"])?;
 
@@ -199,7 +199,7 @@ fn schedule_expired_anchor_falls_back_with_warning() -> eyre::Result<()> {
     assert!(output.stderr.contains("expired"), "{}", output.stderr);
     assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
     insta::assert_snapshot!(output.stderr, @"hint: cycle anchor expired (started 2020-01-01, ended 2020-12-31); run `cycledit init` to set a new one");
-    assert!(!output.stdout.is_empty());
+    assert_ne!(output.stdout, "");
 
     let output = harness.run_cli("2026-01-01T00:00:00+00:00[UTC]", &["check"])?;
 
@@ -207,7 +207,7 @@ fn schedule_expired_anchor_falls_back_with_warning() -> eyre::Result<()> {
     assert!(output.stderr.contains("expired"), "{}", output.stderr);
     assert!(output.stderr.contains("cycledit init"), "{}", output.stderr);
     insta::assert_snapshot!(output.stderr, @"hint: cycle anchor expired (started 2020-01-01, ended 2020-12-31); run `cycledit init` to set a new one");
-    assert!(!output.stdout.is_empty());
+    assert_ne!(output.stdout, "");
 
     Ok(())
 }
