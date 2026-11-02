@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-cargo clippy --all-targets && cargo t --all-targets
+cargo vet check --locked --frozen && cargo clippy --all-targets && cargo t --all-targets

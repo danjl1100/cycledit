@@ -1,0 +1,8 @@
+
+# cargo-vet audits file
+
+[[audits.yoke-derive]]
+who = "Daniel Lambert <danjl1100@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.0 -> 0.8.1"
+notes = "Clippy annotation update only, no functional change"
